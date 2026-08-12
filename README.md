@@ -1,5 +1,7 @@
 # pi-omo-slim
 
+![pi-omo-slim — a Pi orchestrator connected to five specialist agents](assets/pi-omo-slim-banner.png)
+
 An unofficial, lightweight OMO-slim-style orchestration setup for [Pi](https://github.com/earendil-works/pi).
 
 `pi-omo-slim` gives Pi a workflow-oriented Orchestrator and five focused specialist agents:
