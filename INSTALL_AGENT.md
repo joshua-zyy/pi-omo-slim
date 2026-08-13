@@ -32,6 +32,7 @@ extensions/orchestrator-mode/index.ts
 extensions/orchestrator-mode/orchestrator-policy.md
 config/orchestrator-mode.json.example
 config/subagents.json
+scripts/prepare-install-backup.mjs
 ```
 
 If any input is missing or empty, stop before modifying the user's configuration.
@@ -58,7 +59,7 @@ Complete the following without changing any state:
 
 4. Run `pi --list-models` to discover the models currently available in Pi, then prepare the provider/model IDs for the user to choose from. This phase is an availability inventory only. Do not require the repository's Agent templates to contain or resolve any default model, and do not select substitute models during this phase.
 
-5. Inventory the following destinations. For every target, record whether it exists. For each existing file, also record its type, size, modification time, and SHA-256:
+5. Inventory the following destinations. For every target, record whether it exists. For each existing file, also record its type, size, and modification time. Compute SHA-256 only when needed to compare a same-name Agent with its repository template; do not use a preflight hash as an execution-time lock:
    - `<config-root>/settings.json`;
    - `<config-root>/agents/Explore.md`;
    - `<config-root>/agents/librarian.md`;
@@ -132,6 +133,7 @@ After they confirm those choices, present a concise final installation proposal 
 - every destination that will be created or replaced;
 - same-name conflicts and how each will be backed up;
 - the exact backup directory;
+- the exact `scripts/prepare-install-backup.mjs` command, including one `--keep-agent <filename>` argument for every same-name Agent the user chose to keep;
 - the exact package-installation and file-modification commands;
 - verification commands;
 - an explicit statement that no files will be deleted.
@@ -140,22 +142,36 @@ Do not continue without the user's explicit approval of the final installation p
 
 ## Phase 3: backup
 
-After approval, create one timestamped directory under:
+After approval, choose one new timestamped directory under:
 
 ```text
 <config-root>/backups/pi-omo-slim-YYYYMMDD-HHMMSS/
 ```
 
-Back up every existing destination from the Phase 1 inventory that may be modified by the approved installation, including `settings.json`, while preserving an unambiguous relative layout. Do not create placeholder backup files for absent targets or copy existing same-name Agents that the user chose to keep unchanged. Create a `manifest.json` that records every inventoried target, including absent and unchanged targets:
+Immediately before backup, recheck every same-name Agent conflict that the user approved replacing. If one changed after the user reviewed it, stop and obtain a new replace-or-keep decision for that file. For JSON configuration and `settings.json`, do not compare the current file with its preflight SHA-256: Pi may legitimately update those files while the installation is being discussed. Back up their latest state at execution time, and later merge only the approved JSON properties.
+
+Run the repository's fixed backup utility with absolute paths:
+
+```text
+node scripts/prepare-install-backup.mjs \
+  --config-root <config-root> \
+  --backup-dir <config-root>/backups/pi-omo-slim-YYYYMMDD-HHMMSS \
+  --routing <strict|compatibility> \
+  [--keep-agent <filename>]...
+```
+
+Use the exact repository script; do not replace it with an ad hoc Shell, Python, or JavaScript implementation. Pass `--keep-agent` separately for every same-name Agent the user chose to keep, using one of `Explore.md`, `librarian.md`, `oracle.md`, `designer.md`, or `fixer.md`.
+
+The utility backs up every currently existing inventoried target that the approved installation may modify, including the latest `settings.json`, while preserving its relative layout. It creates `manifest.json` entries for all ten targets, including absent and unchanged targets, and records:
 
 - its absolute original path;
-- whether it existed before installation;
+- whether it existed immediately before installation;
 - whether the approved installation may modify it;
-- its backup path, or `null` if it was originally absent or will remain unchanged;
-- the SHA-256 of each existing file;
+- its backup path, or `null` if it was absent or will remain unchanged;
+- the SHA-256 of each existing file at backup time;
 - the backup timestamp.
 
-Before continuing, compare SHA-256 values to verify every copied backup. For an absent target, the manifest records its pre-installation absence so a later approved rollback can distinguish a newly created file from a pre-existing one. Do not include credentials or unrelated files in the backup.
+The utility verifies that each copied backup has the same SHA-256 as its source at backup time. This SHA-256 is backup-integrity and rollback evidence only; it is not a requirement that the live file still match a preflight snapshot or remain unchanged after dependency installation. For an absent target, the manifest records its pre-installation absence so a later approved rollback can distinguish a newly created file from a pre-existing one. Do not include credentials or unrelated files in the backup. Stop if the utility fails.
 
 ## Phase 4: install missing dependencies
 
@@ -208,21 +224,22 @@ Review every changed file before running tests. Fix only issues caused by this i
 
 Verify that:
 
-1. `orchestrator-mode.json` parses as a JSON object and its `defaultEnabled` boolean exactly matches the value approved by the user.
-2. Routing matches the approved mode:
+1. `manifest.json` parses, contains all ten inventoried targets, and every copied backup's SHA-256 matches the value recorded for that target. Do not compare the live post-installation `settings.json` with its installation-time backup because successful `pi install` commands are expected to modify the live file.
+2. `orchestrator-mode.json` parses as a JSON object and its `defaultEnabled` boolean exactly matches the value approved by the user.
+3. Routing matches the approved mode:
    - in strict mode, `subagents.json` parses and contains the two strict values while preserving unrelated properties;
    - in compatibility mode, `subagents.json` remains byte-for-byte unchanged if it existed and remains absent if it did not.
-3. For each Agent installed from this project's template, verify that it has exactly two frontmatter delimiters and contains:
+4. For each Agent installed from this project's template, verify that it has exactly two frontmatter delimiters and contains:
    - `prompt_mode: replace`;
    - `skills: false`;
    - `inherit_context: false`;
    - no `allowed_subagents` field.
    Also verify `model` and `thinking` for every installed project role: inherited settings must omit their fields, while pinned settings must exactly match the configuration approved by the user. For every same-name Agent the user chose to keep, verify that its SHA-256 is unchanged and do not apply project-template assertions to it.
-4. Explorer, Librarian, and Oracle use this project's no-write/no-shell tool restrictions only when their project templates were installed; report kept same-name roles separately.
-5. Designer and Fixer load `pi-extension-safety-guard` only when their project templates were installed; report kept same-name roles separately.
-6. Every `ext:` tool referenced by an Agent installed from this project's template belongs to an installed extension; do not apply this assertion to a same-name Agent the user chose to keep.
-7. The current Pi executable can load the mode extension independently, for example by combining `--no-extensions`, an explicit `--extension` path, and `--list-models`.
-8. Installed-package source code and unrelated global settings were not modified, except for package references written by successful `pi install` commands.
+5. Explorer, Librarian, and Oracle use this project's no-write/no-shell tool restrictions only when their project templates were installed; report kept same-name roles separately.
+6. Designer and Fixer load `pi-extension-safety-guard` only when their project templates were installed; report kept same-name roles separately.
+7. Every `ext:` tool referenced by an Agent installed from this project's template belongs to an installed extension; do not apply this assertion to a same-name Agent the user chose to keep.
+8. The current Pi executable can load the mode extension independently, for example by combining `--no-extensions`, an explicit `--extension` path, and `--list-models`.
+9. Installed-package source code and unrelated global settings were not modified, except for package references written by successful `pi install` commands.
 
 Tell the user to restart Pi or start a new Pi session. In that new session, ask them to verify:
 

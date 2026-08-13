@@ -88,6 +88,7 @@ Designer and Fixer can write files and run shell commands. The Safety Guard exte
 agents/                         Five pi-subagents Agent definitions
 config/                         Installation configuration templates
 extensions/orchestrator-mode/  Mode commands, state handling, and policy
+scripts/                        Deterministic installation backup utility
 INSTALL_AGENT.md                Installation procedure for a Pi Agent
 ```
 
