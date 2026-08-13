@@ -1,0 +1,678 @@
+#!/usr/bin/env node
+import { createHash, randomBytes } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import {
+  copyFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  realpathSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  rmdirSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROLES = ["Explore", "librarian", "oracle", "designer", "fixer"];
+const AGENT_IDS = ROLES.map((role) => `agents/${role}.md`);
+const TARGET_IDS = [
+  ...AGENT_IDS,
+  "extensions/orchestrator-mode/index.ts",
+  "extensions/orchestrator-mode/orchestrator-policy.md",
+  "orchestrator-mode.json",
+  "subagents.json",
+  "settings.json",
+];
+const DEPENDENCIES = [
+  "npm:@tintinweb/pi-subagents",
+  "npm:@ff-labs/pi-fff",
+  "npm:pi-web-access",
+  "npm:pi-lens",
+  "npm:@firstpick/pi-extension-safety-guard",
+];
+const THINKING = new Set(["inherit", "off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+const SUPPORTED_THINKING_LEVELS = [...THINKING].filter((level) => level !== "inherit");
+const ACTIONS = new Set(["install", "keep", "replace"]);
+const MODEL_ID_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.:@+~/-]+$/;
+const PACKAGE_INVENTORY_RE = /(?:^|\s)(npm:(?:@[A-Za-z0-9_.-]+\/)?[A-Za-z0-9_.-]+)(?=\s|$)/g;
+const CMD_UNSAFE_RE = /["&|<>^%!\r\n]/;
+
+function fail(message) {
+  throw new Error(message);
+}
+
+function assertObject(value, label) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) fail(`${label} must be an object`);
+}
+
+function assertKeys(value, allowed, label) {
+  for (const key of Object.keys(value)) if (!allowed.has(key)) fail(`${label} has unknown field: ${key}`);
+}
+
+function parseOptions(argv, allowed) {
+  const options = {};
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (!allowed.has(arg)) fail(`Unknown option: ${arg}`);
+    if (options[arg.slice(2)] !== undefined || argv[i + 1] === undefined) fail(`Invalid ${arg}`);
+    options[arg.slice(2)] = argv[++i];
+  }
+  return options;
+}
+
+function parsePlanArgs(argv) {
+  const options = parseOptions(argv, new Set(["--request", "--config-root"]));
+  if (!options.request || !options["config-root"]) fail("--request and --config-root are required");
+  if (!isAbsolute(options.request) || !isAbsolute(options["config-root"])) fail("CLI paths must be absolute");
+  return { request: resolve(options.request), configRoot: resolve(options["config-root"]) };
+}
+
+function parseApplyArgs(argv) {
+  const options = parseOptions(argv, new Set(["--plan", "--sha256"]));
+  if (!options.plan || !options.sha256) fail("--plan and --sha256 are required");
+  if (!isAbsolute(options.plan)) fail("CLI paths must be absolute");
+  if (!/^[a-f0-9]{64}$/i.test(options.sha256)) fail("--sha256 must be exactly 64 hexadecimal characters");
+  return { planPath: resolve(options.plan), approvedSha256: options.sha256.toLowerCase() };
+}
+
+function ensureNoSymlink(pathname, label, allowMissing = true) {
+  const absolute = resolve(pathname);
+  const parsedRoot = isAbsolute(absolute) ? resolve(dirname(absolute), sep) : sep;
+  let current = parsedRoot;
+  const parts = absolute.slice(parsedRoot.length).split(sep).filter(Boolean);
+  for (const part of parts) {
+    current = join(current, part);
+    let info;
+    try { info = lstatSync(current); } catch (error) {
+      if (allowMissing && error.code === "ENOENT") return;
+      fail(`Cannot inspect ${label}: ${error.message}`);
+    }
+    if (info.isSymbolicLink()) fail(`Symbolic links are not allowed in managed path: ${current}`);
+  }
+}
+
+function contained(root, child, label) {
+  const rel = relative(resolve(root), resolve(child));
+  if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) fail(`${label} escapes its root`);
+  return rel;
+}
+
+function containedReal(root, child, label) {
+  contained(root, child, label);
+  const realRoot = realpathSync(root);
+  let existing = resolve(child);
+  while (!existsSync(existing)) {
+    const parent = dirname(existing);
+    if (parent === existing) fail(`Cannot resolve ${label}`);
+    existing = parent;
+  }
+  const realExisting = realpathSync(existing);
+  if (realExisting !== realRoot) contained(realRoot, realExisting, label);
+}
+
+function regularFile(pathname, label, required = false) {
+  if (!existsSync(pathname)) {
+    if (required) fail(`Missing ${label}: ${pathname}`);
+    return false;
+  }
+  ensureNoSymlink(pathname, label, false);
+  if (!lstatSync(pathname).isFile()) fail(`${label} must be a regular file: ${pathname}`);
+  return true;
+}
+
+function sha256(pathname) {
+  return createHash("sha256").update(readFileSync(pathname)).digest("hex");
+}
+
+function canonical(value) {
+  return `${JSON.stringify(value, null, 2)}\n`;
+}
+
+function validateRequest(request) {
+  assertObject(request, "request");
+  assertKeys(request, new Set(["routing", "orchestratorDefaultEnabled", "agents"]), "request");
+  if (!["strict", "compatibility"].includes(request.routing)) fail("routing must be strict or compatibility");
+  if (typeof request.orchestratorDefaultEnabled !== "boolean") fail("orchestratorDefaultEnabled must be boolean");
+  assertObject(request.agents, "agents");
+  if (Object.keys(request.agents).length !== ROLES.length || ROLES.some((role) => !(role in request.agents))) fail("agents must contain exactly the five required roles");
+  for (const role of ROLES) {
+    const choice = request.agents[role];
+    assertObject(choice, `agents.${role}`);
+    assertKeys(choice, new Set(["action", "model", "thinking"]), `agents.${role}`);
+    if (!ACTIONS.has(choice.action)) fail(`Invalid action for ${role}`);
+    if (typeof choice.model !== "string" || (!choice.model.trim() && choice.model !== "inherit")) fail(`Invalid model for ${role}`);
+    if (typeof choice.thinking !== "string" || !THINKING.has(choice.thinking)) fail(`Invalid thinking for ${role}`);
+  }
+  return request;
+}
+
+function readRequest(pathname) {
+  regularFile(pathname, "request", true);
+  let request;
+  try { request = JSON.parse(readFileSync(pathname, "utf8")); } catch (error) { fail(`Invalid request JSON: ${error.message}`); }
+  return validateRequest(request);
+}
+
+function runPi(executable, args, configRoot) {
+  let command = executable;
+  let commandArgs = args;
+  let windowsVerbatimArguments = false;
+  if (process.platform === "win32" && /\.(?:cmd|bat)$/i.test(executable)) {
+    for (const value of [executable, ...args]) {
+      if (CMD_UNSAFE_RE.test(value)) fail("Unsafe character in Windows Pi command");
+    }
+    command = process.env.ComSpec || "cmd.exe";
+    const invocation = [`"${executable}"`, ...args.map((arg) => `"${arg}"`)].join(" ");
+    commandArgs = ["/d", "/v:off", "/s", "/c", `"${invocation}"`];
+    windowsVerbatimArguments = true;
+  }
+  let output;
+  try {
+    output = execFileSync(command, commandArgs, {
+      encoding: "utf8",
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsVerbatimArguments,
+      env: { ...process.env, PI_CODING_AGENT_DIR: configRoot },
+    });
+  } catch (error) {
+    fail(`Pi command failed (${args.join(" ")}): ${error.stderr?.toString() || error.message}`);
+  }
+  return output;
+}
+
+function inventoryPi(configRoot) {
+  const executable = process.env.PI_EXECUTABLE || (process.platform === "win32" ? "pi.cmd" : "pi");
+  const version = runPi(executable, ["--version"], configRoot).trim();
+  const listOutput = runPi(executable, ["list"], configRoot);
+  const modelsOutput = runPi(executable, ["--list-models"], configRoot);
+  const installedPackages = new Set([...listOutput.matchAll(PACKAGE_INVENTORY_RE)].map((match) => match[1]));
+  const installed = DEPENDENCIES.filter((dependency) => installedPackages.has(dependency));
+  if (installed.length !== DEPENDENCIES.length) fail(`Missing Pi dependencies: ${DEPENDENCIES.filter((item) => !installed.includes(item)).join(", ")}`);
+  const models = [...new Set(modelsOutput.split(/\r?\n/).map((line) => {
+    const columns = line.trim().split(/\s+/);
+    if (columns.length === 1 && MODEL_ID_RE.test(columns[0])) return columns[0];
+    if (columns.length >= 2 && columns[0] !== "provider") {
+      const combined = `${columns[0]}/${columns[1]}`;
+      if (MODEL_ID_RE.test(combined)) return combined;
+    }
+    return null;
+  }).filter(Boolean))];
+  return { executable, version, dependencies: installed, models };
+}
+
+function validateJsonObject(pathname, label) {
+  if (!regularFile(pathname, label)) return null;
+  let value;
+  try { value = JSON.parse(readFileSync(pathname, "utf8")); } catch (error) { fail(`Invalid ${label} JSON: ${error.message}`); }
+  assertObject(value, label);
+  return value;
+}
+
+function targetState(destination, source, label) {
+  const exists = regularFile(destination, label);
+  const sourceExists = source ? regularFile(source, `template ${label}`, true) : false;
+  const destinationHash = exists ? sha256(destination) : null;
+  const sourceHash = sourceExists ? sha256(source) : null;
+  return {
+    state: !exists ? "absent" : sourceHash === destinationHash ? "identical" : "conflict",
+    exists_before: exists,
+    destination_hash: destinationHash,
+    template_hash: sourceHash,
+  };
+}
+
+function planMain(argv) {
+  const { request: requestPath, configRoot } = parsePlanArgs(argv);
+  ensureNoSymlink(configRoot, "configuration root", false);
+  if (!lstatSync(configRoot).isDirectory()) fail("Configuration root must be a directory");
+  const realConfigRoot = realpathSync(configRoot);
+  const repositoryRoot = resolve(process.env.PI_OMO_REPOSITORY_ROOT || join(dirname(fileURLToPath(import.meta.url)), ".."));
+  ensureNoSymlink(repositoryRoot, "repository root", false);
+  if (!lstatSync(repositoryRoot).isDirectory()) fail("Repository root must be a directory");
+  const realRepositoryRoot = realpathSync(repositoryRoot);
+  const request = readRequest(requestPath);
+  const sources = Object.fromEntries([
+    ...AGENT_IDS.map((id) => [id, join(repositoryRoot, id)]),
+    ["extensions/orchestrator-mode/index.ts", join(repositoryRoot, "extensions/orchestrator-mode/index.ts")],
+    ["extensions/orchestrator-mode/orchestrator-policy.md", join(repositoryRoot, "extensions/orchestrator-mode/orchestrator-policy.md")],
+    ["orchestrator-mode.json", join(repositoryRoot, "config/orchestrator-mode.json.example")],
+    ["subagents.json", join(repositoryRoot, "config/subagents.json")],
+    ["settings.json", null],
+  ]);
+  for (const id of TARGET_IDS) if (sources[id]) {
+    containedReal(realRepositoryRoot, sources[id], "template");
+    ensureNoSymlink(sources[id], "template", false);
+  }
+  const pi = inventoryPi(configRoot);
+  for (const role of ROLES) {
+    const model = request.agents[role].model;
+    if (model !== "inherit" && !pi.models.includes(model)) fail(`Unavailable pinned model for ${role}: ${model}`);
+  }
+  validateJsonObject(join(configRoot, "orchestrator-mode.json"), "orchestrator-mode.json");
+  validateJsonObject(join(configRoot, "subagents.json"), "subagents.json");
+  validateJsonObject(join(configRoot, "settings.json"), "settings.json");
+  const targets = TARGET_IDS.map((id) => {
+    const destination = join(configRoot, id);
+    containedReal(realConfigRoot, destination, `destination ${id}`);
+    ensureNoSymlink(destination, `destination ${id}`);
+    const state = targetState(destination, sources[id], id);
+    let action = "install";
+    if (id.startsWith("agents/")) {
+      const requested = request.agents[id.slice(7, -3)].action;
+      if (state.state === "conflict" && requested === "install") fail(`Conflict requires keep or replace: ${id}`);
+      if (state.state !== "conflict" && requested !== "install") fail(`Action ${requested} is not allowed for ${state.state} destination: ${id}`);
+      action = requested;
+    } else if (id === "orchestrator-mode.json") action = "merge";
+    else if (id === "subagents.json") action = request.routing === "strict" ? "merge" : "keep";
+    else if (id === "settings.json") action = "observe";
+    else if (state.state === "identical") action = "keep";
+    const mayModify = ["install", "replace", "merge"].includes(action);
+    return {
+      id,
+      source: sources[id] ? relative(repositoryRoot, sources[id]).replaceAll(sep, "/") : null,
+      destination: resolve(destination),
+      state: state.state,
+      exists_before: state.exists_before,
+      planned_action: action,
+      source_hash: state.template_hash,
+      destination_hash: state.destination_hash,
+      replacement_conflict_hash: state.state === "conflict" ? state.destination_hash : null,
+      may_modify: mayModify,
+    };
+  });
+  const customAgents = [];
+  const agentsDir = join(configRoot, "agents");
+  if (existsSync(agentsDir)) {
+    ensureNoSymlink(agentsDir, "agents directory", false);
+    if (!lstatSync(agentsDir).isDirectory()) fail("agents must be a directory");
+    for (const name of readdirSync(agentsDir)) {
+      const id = `agents/${name}`;
+      if (AGENT_IDS.includes(id)) continue;
+      const path = join(agentsDir, name);
+      ensureNoSymlink(path, `custom Agent ${id}`, false);
+      if (lstatSync(path).isFile()) customAgents.push({ id, path: resolve(path), sha256: sha256(path) });
+    }
+  }
+  const planId = `${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${randomBytes(10).toString("hex")}`;
+  const auditDir = join(configRoot, "install-records", planId);
+  containedReal(realConfigRoot, auditDir, "audit directory");
+  ensureNoSymlink(join(configRoot, "install-records"), "install-records");
+  if (existsSync(auditDir)) fail(`Plan collision: ${auditDir}`);
+  const rollbackDirectories = new Set();
+  for (const target of targets.filter((item) => !item.exists_before && item.may_modify)) {
+    let directory = dirname(target.destination);
+    while (directory !== configRoot && !existsSync(directory)) {
+      rollbackDirectories.add(directory);
+      directory = dirname(directory);
+    }
+  }
+  const plan = {
+    schema_version: 1,
+    plan_id: planId,
+    generated_at: new Date().toISOString(),
+    status: "planned",
+    repository_root: repositoryRoot,
+    config_root: configRoot,
+    request: {
+      routing: request.routing,
+      orchestratorDefaultEnabled: request.orchestratorDefaultEnabled,
+      agents: Object.fromEntries(ROLES.map((role) => [role, { ...request.agents[role] }])),
+    },
+    pi: {
+      executable: pi.executable,
+      version: pi.version,
+      dependencies: pi.dependencies,
+      models: pi.models,
+      accepted_thinking_levels: SUPPORTED_THINKING_LEVELS,
+    },
+    targets,
+    unrelated_custom_agents: customAgents,
+    backup_directory: join(configRoot, "backups", planId),
+    rollback: {
+      delete_files: targets.filter((target) => !target.exists_before && target.may_modify).map((target) => target.destination),
+      remove_empty_directories: [...rollbackDirectories].sort((left, right) => right.length - left.length || left.localeCompare(right)),
+    },
+    template_hashes: Object.fromEntries(targets.filter((target) => target.source_hash).map((target) => [target.source, target.source_hash])),
+    replacement_conflict_hashes: Object.fromEntries(targets.filter((target) => target.replacement_conflict_hash).map((target) => [target.id, target.replacement_conflict_hash])),
+  };
+  mkdirSync(dirname(auditDir), { recursive: true });
+  mkdirSync(auditDir, { recursive: false });
+  const planPath = join(auditDir, "plan.json");
+  writeFileSync(planPath, canonical(plan), { encoding: "utf8", flag: "wx" });
+  process.stdout.write(`${planPath}\n${sha256(planPath)}\n`);
+}
+
+function readJsonObject(pathname, label, fallback = null) {
+  if (!existsSync(pathname)) return fallback;
+  regularFile(pathname, label, true);
+  let value;
+  try { value = JSON.parse(readFileSync(pathname, "utf8")); } catch (error) { fail(`Invalid ${label} JSON: ${error.message}`); }
+  assertObject(value, label);
+  return value;
+}
+
+function expectedSourceMap(repositoryRoot) {
+  return Object.fromEntries([
+    ...AGENT_IDS.map((id) => [id, join(repositoryRoot, id)]),
+    ["extensions/orchestrator-mode/index.ts", join(repositoryRoot, "extensions/orchestrator-mode/index.ts")],
+    ["extensions/orchestrator-mode/orchestrator-policy.md", join(repositoryRoot, "extensions/orchestrator-mode/orchestrator-policy.md")],
+    ["orchestrator-mode.json", join(repositoryRoot, "config/orchestrator-mode.json.example")],
+    ["subagents.json", join(repositoryRoot, "config/subagents.json")],
+    ["settings.json", null],
+  ]);
+}
+
+function validatePlan(plan, planPath) {
+  assertObject(plan, "plan");
+  if (plan.schema_version !== 1 || plan.status !== "planned") fail("Unsupported or non-planned install plan");
+  if (typeof plan.plan_id !== "string" || !/^[0-9]{14}-[a-f0-9]{20}$/.test(plan.plan_id)) fail("Invalid plan ID");
+  if (!isAbsolute(plan.config_root) || !isAbsolute(plan.repository_root) || !isAbsolute(plan.backup_directory)) fail("Plan roots must be absolute");
+  const configRoot = resolve(plan.config_root);
+  const repositoryRoot = resolve(plan.repository_root);
+  ensureNoSymlink(configRoot, "configuration root", false);
+  ensureNoSymlink(repositoryRoot, "repository root", false);
+  if (!lstatSync(configRoot).isDirectory() || !lstatSync(repositoryRoot).isDirectory()) fail("Plan roots must be directories");
+  const expectedPlanPath = join(configRoot, "install-records", plan.plan_id, "plan.json");
+  if (resolve(planPath) !== expectedPlanPath) fail("Plan path does not match its recorded audit directory");
+  if (resolve(plan.backup_directory) !== join(configRoot, "backups", plan.plan_id)) fail("Invalid backup directory");
+  assertObject(plan.request, "plan.request");
+  validateRequest(plan.request);
+  assertObject(plan.pi, "plan.pi");
+  if (!Array.isArray(plan.pi.models) || !Array.isArray(plan.pi.dependencies)) fail("Invalid Pi inventory in plan");
+  for (const role of ROLES) {
+    const model = plan.request.agents[role].model;
+    if (model !== "inherit" && (!MODEL_ID_RE.test(model) || !plan.pi.models.includes(model))) fail(`Invalid pinned model in plan for ${role}`);
+  }
+  if (!Array.isArray(plan.targets) || plan.targets.length !== TARGET_IDS.length) fail("Plan must contain exactly ten targets");
+  const targetIds = plan.targets.map((target) => target?.id);
+  if (new Set(targetIds).size !== TARGET_IDS.length || TARGET_IDS.some((id) => !targetIds.includes(id))) fail("Plan target IDs are invalid");
+  const sources = expectedSourceMap(repositoryRoot);
+  for (const target of plan.targets) {
+    assertObject(target, `target ${target?.id}`);
+    if (resolve(target.destination) !== join(configRoot, target.id)) fail(`Invalid destination for ${target.id}`);
+    containedReal(realpathSync(configRoot), target.destination, `destination ${target.id}`);
+    const expectedSource = sources[target.id];
+    const expectedSourceId = expectedSource ? relative(repositoryRoot, expectedSource).replaceAll(sep, "/") : null;
+    if (target.source !== expectedSourceId) fail(`Invalid source for ${target.id}`);
+    if (expectedSource && !/^[a-f0-9]{64}$/.test(target.source_hash)) fail(`Invalid source hash for ${target.id}`);
+    if (!expectedSource && target.source_hash !== null) fail(`Unexpected source hash for ${target.id}`);
+    if (typeof target.exists_before !== "boolean" || typeof target.may_modify !== "boolean") fail(`Invalid state for ${target.id}`);
+    if (!["absent", "identical", "conflict"].includes(target.state) || target.exists_before !== (target.state !== "absent")) fail(`Invalid planned state for ${target.id}`);
+    let expectedAction;
+    if (target.id.startsWith("agents/")) {
+      const role = target.id.slice(7, -3);
+      expectedAction = plan.request.agents[role].action;
+      if (target.state === "conflict" ? !["keep", "replace"].includes(expectedAction) : expectedAction !== "install") fail(`Invalid Agent action for ${target.id}`);
+    } else if (target.id === "orchestrator-mode.json") expectedAction = "merge";
+    else if (target.id === "subagents.json") expectedAction = plan.request.routing === "strict" ? "merge" : "keep";
+    else if (target.id === "settings.json") expectedAction = "observe";
+    else expectedAction = target.state === "identical" ? "keep" : "install";
+    const expectedMayModify = ["install", "replace", "merge"].includes(expectedAction);
+    if (target.planned_action !== expectedAction || target.may_modify !== expectedMayModify) fail(`Invalid planned operation for ${target.id}`);
+    if (target.state === "conflict") {
+      if (!/^[a-f0-9]{64}$/.test(target.destination_hash) || target.replacement_conflict_hash !== target.destination_hash) fail(`Invalid conflict hash for ${target.id}`);
+    } else if (target.replacement_conflict_hash !== null) fail(`Unexpected conflict hash for ${target.id}`);
+  }
+  assertObject(plan.rollback, "plan.rollback");
+  if (!Array.isArray(plan.rollback.delete_files) || !Array.isArray(plan.rollback.remove_empty_directories)) fail("Invalid rollback lists");
+  const approvedDeletes = new Set(plan.targets.filter((target) => !target.exists_before && target.may_modify).map((target) => target.destination));
+  if (plan.rollback.delete_files.length !== approvedDeletes.size || plan.rollback.delete_files.some((pathname) => !approvedDeletes.has(pathname))) fail("Invalid rollback delete list");
+  for (const pathname of plan.rollback.remove_empty_directories) {
+    containedReal(realpathSync(configRoot), pathname, "rollback directory");
+    if (![...approvedDeletes].some((file) => {
+      const rel = relative(pathname, file);
+      return rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+    })) fail(`Rollback directory is not an ancestor of an approved file: ${pathname}`);
+  }
+  return { configRoot, repositoryRoot, sources };
+}
+
+function transformAgent(sourceBytes, choice, role) {
+  const text = sourceBytes.toString("utf8");
+  const newline = text.includes("\r\n") ? "\r\n" : "\n";
+  const lines = text.split(/\r?\n/);
+  const delimiters = lines.map((line, index) => line === "---" ? index : -1).filter((index) => index !== -1);
+  if (delimiters.length !== 2 || delimiters[0] !== 0 || delimiters[1] <= 1) fail(`Invalid frontmatter delimiters for ${role}`);
+  const frontmatter = lines.slice(1, delimiters[1]).filter((line) => !/^(?:model|thinking):\s*/.test(line));
+  if (choice.model !== "inherit") frontmatter.push(`model: ${choice.model}`);
+  if (choice.thinking !== "inherit") frontmatter.push(`thinking: ${choice.thinking}`);
+  const transformed = ["---", ...frontmatter, "---", ...lines.slice(delimiters[1] + 1)].join(newline);
+  return Buffer.from(transformed, "utf8");
+}
+
+function snapshotUnrelatedAgents(configRoot) {
+  const result = new Map();
+  const agentsDir = join(configRoot, "agents");
+  if (!existsSync(agentsDir)) return result;
+  ensureNoSymlink(agentsDir, "agents directory", false);
+  for (const name of readdirSync(agentsDir)) {
+    const id = `agents/${name}`;
+    if (AGENT_IDS.includes(id)) continue;
+    const pathname = join(agentsDir, name);
+    ensureNoSymlink(pathname, `unrelated Agent ${id}`, false);
+    if (lstatSync(pathname).isFile()) result.set(id, sha256(pathname));
+  }
+  return result;
+}
+
+function injectFailure(checkpoint) {
+  if (process.env.PI_OMO_INSTALL_TEST_MODE === "1" && process.env.PI_OMO_INSTALL_TEST_FAILURE === checkpoint) {
+    fail(`Injected failure at ${checkpoint}`);
+  }
+}
+
+function applyMain(argv) {
+  const { planPath, approvedSha256 } = parseApplyArgs(argv);
+  regularFile(planPath, "plan", true);
+  const planBytes = readFileSync(planPath);
+  const actualPlanSha = createHash("sha256").update(planBytes).digest("hex");
+  if (actualPlanSha !== approvedSha256) fail("Approved plan SHA-256 does not match plan bytes");
+  let plan;
+  try { plan = JSON.parse(planBytes.toString("utf8")); } catch (error) { fail(`Invalid plan JSON: ${error.message}`); }
+  const { configRoot, repositoryRoot, sources } = validatePlan(plan, planPath);
+  const auditDir = dirname(planPath);
+  const attemptPath = join(auditDir, "apply-started.json");
+  const resultPath = join(auditDir, "result.json");
+  const rollbackPath = join(auditDir, "rollback.json");
+  if (existsSync(attemptPath) || existsSync(resultPath) || existsSync(plan.backup_directory)) fail("Plan has already been attempted or its output paths exist");
+
+  for (const target of plan.targets) {
+    if (target.source) {
+      const sourcePath = sources[target.id];
+      regularFile(sourcePath, `source ${target.id}`, true);
+      containedReal(realpathSync(repositoryRoot), sourcePath, `source ${target.id}`);
+      if (sha256(sourcePath) !== target.source_hash) fail(`Source drift detected: ${target.id}`);
+    }
+    const destinationExists = existsSync(target.destination);
+    if (target.planned_action === "replace") {
+      if (!destinationExists || sha256(target.destination) !== target.replacement_conflict_hash) fail(`Approved replacement drift detected: ${target.id}`);
+    }
+    if (target.id.startsWith("agents/") && target.planned_action === "install" && !target.exists_before && destinationExists) {
+      fail(`Install destination appeared after approval: ${target.id}`);
+    }
+  }
+
+  const beforeHashes = new Map();
+  for (const target of plan.targets) if (existsSync(target.destination)) beforeHashes.set(target.id, sha256(target.destination));
+  const unrelatedAgents = snapshotUnrelatedAgents(configRoot);
+  const orchestratorBefore = readJsonObject(join(configRoot, "orchestrator-mode.json"), "orchestrator-mode.json", {});
+  const routingBefore = readJsonObject(join(configRoot, "subagents.json"), "subagents.json", null);
+  readJsonObject(join(configRoot, "settings.json"), "settings.json", null);
+
+  writeFileSync(attemptPath, canonical({ plan_id: plan.plan_id, started_at: new Date().toISOString(), approved_sha256: approvedSha256 }), { flag: "wx" });
+  const transaction = { files: [], directories: [], operations: [] };
+  const backupById = new Map();
+  const existedAtBackup = new Map();
+  const hashAtBackup = new Map();
+  let createCount = 0;
+  let replacementCount = 0;
+
+  function ensureManagedParent(pathname) {
+    const missing = [];
+    let current = dirname(pathname);
+    while (current !== configRoot && !existsSync(current)) {
+      missing.push(current);
+      current = dirname(current);
+    }
+    for (const directory of missing.reverse()) {
+      if (!plan.rollback.remove_empty_directories.includes(directory)) fail(`Directory creation was not approved: ${directory}`);
+      mkdirSync(directory, { recursive: false });
+      transaction.directories.push(directory);
+    }
+  }
+
+  function writeManaged(target, bytes) {
+    containedReal(realpathSync(configRoot), target.destination, `write ${target.id}`);
+    ensureNoSymlink(target.destination, `write ${target.id}`);
+    ensureManagedParent(target.destination);
+    const existed = existsSync(target.destination);
+    if (existed !== existedAtBackup.get(target.id)) fail(`Target changed after backup: ${target.id}`);
+    if (existed && sha256(target.destination) !== hashAtBackup.get(target.id)) fail(`Target content changed after backup: ${target.id}`);
+    const backup = backupById.get(target.id) || null;
+    transaction.files.push({ id: target.id, path: target.destination, existed, backup });
+    writeFileSync(target.destination, bytes);
+    transaction.operations.push({ type: existed ? "replace" : "create", id: target.id, path: target.destination });
+    if (existed) {
+      replacementCount += 1;
+      if (replacementCount === 1) injectFailure("after_first_replacement");
+    } else {
+      createCount += 1;
+      if (createCount === 1) injectFailure("after_first_create");
+    }
+  }
+
+  function writeRecord(pathname, value) {
+    writeFileSync(pathname, canonical(value), { flag: "wx" });
+  }
+
+  try {
+    const backupsRoot = dirname(plan.backup_directory);
+    containedReal(realpathSync(configRoot), backupsRoot, "backups directory");
+    ensureNoSymlink(backupsRoot, "backups directory");
+    mkdirSync(backupsRoot, { recursive: true });
+    ensureNoSymlink(backupsRoot, "backups directory", false);
+    mkdirSync(plan.backup_directory, { recursive: false });
+    const manifestTargets = [];
+    for (const target of plan.targets) {
+      const existed = existsSync(target.destination);
+      existedAtBackup.set(target.id, existed);
+      const shouldBackup = existed && (target.may_modify || target.id === "settings.json");
+      let backupPath = null;
+      let originalHash = existed ? sha256(target.destination) : null;
+      hashAtBackup.set(target.id, originalHash);
+      let backupHash = null;
+      if (shouldBackup) {
+        backupPath = join(plan.backup_directory, target.id);
+        mkdirSync(dirname(backupPath), { recursive: true });
+        copyFileSync(target.destination, backupPath);
+        backupHash = sha256(backupPath);
+        if (backupHash !== originalHash) fail(`Backup verification failed: ${target.id}`);
+        backupById.set(target.id, backupPath);
+      }
+      manifestTargets.push({ id: target.id, existed, may_modify: target.may_modify, original_sha256: originalHash, backup_path: backupPath, backup_sha256: backupHash });
+    }
+    const manifestPath = join(plan.backup_directory, "manifest.json");
+    writeFileSync(manifestPath, canonical({ schema_version: 1, plan_id: plan.plan_id, created_at: new Date().toISOString(), targets: manifestTargets }), { flag: "wx" });
+    injectFailure("after_backup");
+
+    for (const role of ROLES) {
+      const target = plan.targets.find((item) => item.id === `agents/${role}.md`);
+      if (!target.may_modify) continue;
+      writeManaged(target, transformAgent(readFileSync(sources[target.id]), plan.request.agents[role], role));
+    }
+    for (const id of ["extensions/orchestrator-mode/index.ts", "extensions/orchestrator-mode/orchestrator-policy.md"]) {
+      const target = plan.targets.find((item) => item.id === id);
+      if (target.may_modify) writeManaged(target, readFileSync(sources[id]));
+    }
+    const orchestratorTarget = plan.targets.find((item) => item.id === "orchestrator-mode.json");
+    writeManaged(orchestratorTarget, Buffer.from(canonical({ ...orchestratorBefore, defaultEnabled: plan.request.orchestratorDefaultEnabled })));
+    if (plan.request.routing === "strict") {
+      const routingTarget = plan.targets.find((item) => item.id === "subagents.json");
+      const routingBase = routingBefore ?? readJsonObject(sources["subagents.json"], "routing template", {});
+      writeManaged(routingTarget, Buffer.from(canonical({ ...routingBase, disableDefaultAgents: true, fallbackSubagent: "none" })));
+    }
+    injectFailure("after_json_merge");
+
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    if (manifest.targets.length !== 10 || new Set(manifest.targets.map((item) => item.id)).size !== 10) fail("Manifest target set is invalid");
+    for (const item of manifest.targets) if (item.backup_path && sha256(item.backup_path) !== item.backup_sha256) fail(`Backup hash mismatch: ${item.id}`);
+    for (const role of ROLES) {
+      const target = plan.targets.find((item) => item.id === `agents/${role}.md`);
+      if (target.may_modify) {
+        const expected = transformAgent(readFileSync(sources[target.id]), plan.request.agents[role], role);
+        if (!readFileSync(target.destination).equals(expected)) fail(`Installed Agent verification failed: ${role}`);
+        const installedText = expected.toString("utf8");
+        if (
+          (installedText.match(/^---\r?$/gm) || []).length !== 2
+          || /^allowed_subagents:/m.test(installedText)
+          || !/^inherit_context: false\r?$/m.test(installedText)
+          || !/^prompt_mode: replace\r?$/m.test(installedText)
+        ) fail(`Agent safety verification failed: ${role}`);
+      } else if (beforeHashes.get(target.id) !== sha256(target.destination)) fail(`Kept Agent changed: ${role}`);
+    }
+    for (const id of ["extensions/orchestrator-mode/index.ts", "extensions/orchestrator-mode/orchestrator-policy.md"]) {
+      const target = plan.targets.find((item) => item.id === id);
+      if (target.may_modify && sha256(target.destination) !== sha256(sources[id])) fail(`Extension verification failed: ${id}`);
+    }
+    const actualOrchestrator = readJsonObject(orchestratorTarget.destination, "orchestrator-mode.json", null);
+    if (canonical(actualOrchestrator) !== canonical({ ...orchestratorBefore, defaultEnabled: plan.request.orchestratorDefaultEnabled })) fail("Orchestrator verification failed");
+    const routingTarget = plan.targets.find((item) => item.id === "subagents.json");
+    if (plan.request.routing === "strict") {
+      const routingBase = routingBefore ?? readJsonObject(sources["subagents.json"], "routing template", {});
+      if (canonical(readJsonObject(routingTarget.destination, "subagents.json", null)) !== canonical({ ...routingBase, disableDefaultAgents: true, fallbackSubagent: "none" })) fail("Strict routing verification failed");
+    } else if (beforeHashes.has(routingTarget.id) ? sha256(routingTarget.destination) !== beforeHashes.get(routingTarget.id) : existsSync(routingTarget.destination)) fail("Compatibility routing changed");
+    const settingsTarget = plan.targets.find((item) => item.id === "settings.json");
+    if (beforeHashes.has(settingsTarget.id) ? sha256(settingsTarget.destination) !== beforeHashes.get(settingsTarget.id) : existsSync(settingsTarget.destination)) fail("settings.json changed");
+    const unrelatedAfter = snapshotUnrelatedAgents(configRoot);
+    if (unrelatedAfter.size !== unrelatedAgents.size || [...unrelatedAgents].some(([id, hash]) => unrelatedAfter.get(id) !== hash)) fail("Unrelated Agent changed");
+    injectFailure("during_verification");
+    writeRecord(resultPath, { schema_version: 1, plan_id: plan.plan_id, status: "succeeded", completed_at: new Date().toISOString(), manifest: manifestPath, operations: transaction.operations });
+    process.stdout.write(`${resultPath}\n`);
+  } catch (error) {
+    const compensations = [];
+    const unresolved = [];
+    let simulatedRollbackFailure = process.env.PI_OMO_INSTALL_TEST_MODE === "1" && process.env.PI_OMO_INSTALL_TEST_ROLLBACK_FAILURE === "first";
+    for (const file of [...transaction.files].reverse()) {
+      try {
+        if (simulatedRollbackFailure) {
+          simulatedRollbackFailure = false;
+          throw new Error("Injected rollback failure");
+        }
+        if (file.existed) {
+          if (!file.backup) throw new Error("Missing verified backup");
+          copyFileSync(file.backup, file.path);
+        } else if (existsSync(file.path)) rmSync(file.path, { force: true });
+        compensations.push({ type: file.existed ? "restore" : "delete", path: file.path, status: "succeeded" });
+      } catch (rollbackError) {
+        unresolved.push(file.path);
+        compensations.push({ type: file.existed ? "restore" : "delete", path: file.path, status: "failed", error: rollbackError.message });
+      }
+    }
+    for (const directory of [...transaction.directories].reverse()) {
+      try {
+        if (existsSync(directory)) rmdirSync(directory);
+        compensations.push({ type: "remove_empty_directory", path: directory, status: "succeeded" });
+      } catch (rollbackError) {
+        unresolved.push(directory);
+        compensations.push({ type: "remove_empty_directory", path: directory, status: "failed", error: rollbackError.message });
+      }
+    }
+    const status = unresolved.length === 0 ? "rolled_back" : "rollback_incomplete";
+    writeRecord(rollbackPath, { schema_version: 1, plan_id: plan.plan_id, status, failed_at: new Date().toISOString(), cause: error.message, compensations, unresolved_paths: unresolved });
+    writeRecord(resultPath, { schema_version: 1, plan_id: plan.plan_id, status, completed_at: new Date().toISOString(), error: error.message, unresolved_paths: unresolved });
+    fail(`Installation failed and ${status === "rolled_back" ? "was rolled back" : "rollback is incomplete"}: ${error.message}`);
+  }
+}
+
+function main() {
+  const [subcommand, ...argv] = process.argv.slice(2);
+  if (subcommand === "plan") return planMain(argv);
+  if (subcommand === "apply") return applyMain(argv);
+  fail("Subcommand must be plan or apply");
+}
+
+try { main(); } catch (error) { process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`); process.exitCode = 1; }

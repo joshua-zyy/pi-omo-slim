@@ -34,26 +34,24 @@ Open Pi in any directory and enter the following prompt. You do not need to clon
 Install pi-omo-slim from https://github.com/joshua-zyy/pi-omo-slim. First ask me where the repository should be cloned. Before cloning, show me the exact target path and git clone command and wait for my explicit approval. Do not overwrite or update an existing directory without inspecting it and obtaining separate approval. After cloning, read INSTALL_AGENT.md from the local clone completely and follow it exactly. Approval to clone is not approval to modify my Pi configuration. Do not modify my Pi configuration until you have shown me the exact targets, backup plan, and commands required by INSTALL_AGENT.md and I have approved the final installation proposal.
 ```
 
-The Agent will ask where to place the repository, obtain approval for the exact clone command, and then continue from the local installation guide. That guide separately instructs the Agent to inspect the Pi environment, ask how models should be configured, resolve same-name Agent conflicts individually, let the user choose strict or compatibility routing, back up affected configuration, install missing dependencies, copy the approved project files, and verify the result.
+The Agent will ask where to place the repository, obtain approval for the exact clone command, and then continue from the local installation guide. That guide uses `scripts/install.mjs` as the sole deterministic entry point: the Agent writes a closed request, generates an immutable plan, shows its operations, automatic rollback scope, and SHA-256 for explicit approval, then runs one `apply` command. Backup, writes, verification, and failure rollback are implemented by the fixed cross-platform Node.js installer rather than Agent-authored shell commands.
 
 Repository cloning and Pi configuration installation are two separate approval checkpoints. Approving the clone does not authorize any Pi configuration change.
 
-## Manual installation outline
+## Deterministic installation outline
 
-If you prefer to configure Pi yourself:
+Install the five required packages separately before planning. Then create the closed `request.json` documented in `INSTALL_AGENT.md` and run:
 
-1. Install the five required packages with `pi install npm:<package-name>`.
-2. Copy `agents/*.md` to Pi's global `agents` directory.
-   Leave `model` and `thinking` omitted to inherit from the parent Agent. If you want pinned settings, modify only the destination copies.
-3. Copy `extensions/orchestrator-mode` to Pi's global `extensions` directory.
-4. Optionally create `<config-root>/orchestrator-mode.json` from `config/orchestrator-mode.json.example`. Set `defaultEnabled` to `true` to enable Orchestrator Mode by default in sessions that have no explicit mode state.
-5. Merge the two properties from `config/subagents.json` into `<config-root>/subagents.json` without overwriting unrelated settings.
-6. Restart Pi so that `pi-subagents` rebuilds its Agent type list.
-7. Run `/orchestrator status`; use `/orchestrator on` or `/orchestrator off` to override the mode for the current session branch.
+```text
+node scripts/install.mjs plan --request <absolute-request.json> --config-root <absolute-config-root>
+node scripts/install.mjs apply --plan <absolute-plan.json> --sha256 <approved-plan-sha256>
+```
+
+Review the generated plan and approve its exact SHA before `apply`. The installer backs up the latest execution-time state, writes only approved targets, performs fixed verification, and automatically rolls back transaction-created or replaced files on failure. Plans, backups, results, and rollback reports remain under the Pi configuration root for auditing.
 
 The default global configuration directory is `~/.pi/agent`. If `PI_CODING_AGENT_DIR` is set, Pi uses the directory specified by that environment variable instead.
 
-Always back up existing files before copying or merging. In particular, never silently overwrite custom Agents with the same names.
+Do not hand-edit a generated plan or silently overwrite same-name custom Agents. Generate a new plan whenever choices or an approved replacement conflict change.
 
 ## Commands
 
@@ -88,7 +86,7 @@ Designer and Fixer can write files and run shell commands. The Safety Guard exte
 agents/                         Five pi-subagents Agent definitions
 config/                         Installation configuration templates
 extensions/orchestrator-mode/  Mode commands, state handling, and policy
-scripts/                        Deterministic installation backup utility
+scripts/install.mjs             Deterministic plan/apply/verify/rollback installer
 INSTALL_AGENT.md                Installation procedure for a Pi Agent
 ```
 
