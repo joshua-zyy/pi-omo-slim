@@ -705,7 +705,14 @@ function applyMain(argv) {
           containedReal(realpathSync(configRoot), file.path, `restore ${file.path}`);
           ensureNoSymlink(file.path, `restore ${file.path}`);
           copyFileSync(file.backup, file.path);
-        } else if (existsSync(file.path)) rmSync(file.path, { force: true });
+        } else if (existsSync(file.path)) {
+          // Re-check containment and symlink state before deleting: never let
+          // rmSync follow a destination or ancestor that became a symlink/
+          // junction after the transaction created the file.
+          containedReal(realpathSync(configRoot), file.path, `delete ${file.path}`);
+          ensureNoSymlink(file.path, `delete ${file.path}`);
+          rmSync(file.path, { force: true });
+        }
         compensations.push({ type: file.existed ? "restore" : "delete", path: file.path, status: "succeeded" });
       } catch (rollbackError) {
         unresolved.push(file.path);
