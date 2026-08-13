@@ -9,6 +9,7 @@ import {
   realpathSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   rmdirSync,
   writeFileSync,
@@ -125,6 +126,10 @@ function regularFile(pathname, label, required = false) {
 
 function sha256(pathname) {
   return createHash("sha256").update(readFileSync(pathname)).digest("hex");
+}
+
+function sha256Bytes(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
 }
 
 function canonical(value) {
@@ -355,6 +360,13 @@ function readJsonObject(pathname, label, fallback = null) {
   return value;
 }
 
+function jsonFromBuffer(buffer, label) {
+  let value;
+  try { value = JSON.parse(buffer.toString("utf8")); } catch (error) { fail(`Invalid ${label} JSON: ${error.message}`); }
+  assertObject(value, label);
+  return value;
+}
+
 function expectedSourceMap(repositoryRoot) {
   return Object.fromEntries([
     ...AGENT_IDS.map((id) => [id, join(repositoryRoot, id)]),
@@ -465,6 +477,26 @@ function injectFailure(checkpoint) {
   }
 }
 
+function sleepMs(milliseconds) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+// Test-only pause: lets the test suite mutate sources/targets between installer
+// phases to prove drift cannot be installed. Never active outside PI_OMO_INSTALL_TEST_MODE.
+function testPause(checkpoint) {
+  if (process.env.PI_OMO_INSTALL_TEST_MODE !== "1" || process.env.PI_OMO_INSTALL_TEST_PAUSE !== checkpoint) return;
+  const marker = process.env.PI_OMO_INSTALL_TEST_PAUSE_MARKER;
+  const resume = process.env.PI_OMO_INSTALL_TEST_PAUSE_RESUME;
+  if (marker) writeFileSync(marker, checkpoint);
+  if (resume) {
+    const deadline = Date.now() + 60000;
+    while (!existsSync(resume)) {
+      if (Date.now() > deadline) fail(`Test pause timed out at ${checkpoint}`);
+      sleepMs(10);
+    }
+  }
+}
+
 function applyMain(argv) {
   const { planPath, approvedSha256 } = parseApplyArgs(argv);
   regularFile(planPath, "plan", true);
@@ -480,22 +512,26 @@ function applyMain(argv) {
   const rollbackPath = join(auditDir, "rollback.json");
   if (existsSync(attemptPath) || existsSync(resultPath) || existsSync(plan.backup_directory)) fail("Plan has already been attempted or its output paths exist");
 
+  const verifiedSources = new Map();
   for (const target of plan.targets) {
     if (target.source) {
       const sourcePath = sources[target.id];
       regularFile(sourcePath, `source ${target.id}`, true);
       containedReal(realpathSync(repositoryRoot), sourcePath, `source ${target.id}`);
-      if (sha256(sourcePath) !== target.source_hash) fail(`Source drift detected: ${target.id}`);
+      const bytes = readFileSync(sourcePath);
+      if (sha256Bytes(bytes) !== target.source_hash) fail(`Source drift detected: ${target.id}`);
+      verifiedSources.set(target.id, bytes);
     }
     const destinationExists = existsSync(target.destination);
     if (target.planned_action === "replace") {
       if (!destinationExists || sha256(target.destination) !== target.replacement_conflict_hash) fail(`Approved replacement drift detected: ${target.id}`);
     }
-    if (target.id.startsWith("agents/") && target.planned_action === "install" && !target.exists_before && destinationExists) {
-      fail(`Install destination appeared after approval: ${target.id}`);
-    }
+    if (!target.exists_before && destinationExists) fail(`Destination appeared after approval: ${target.id}`);
+    if (target.exists_before && !destinationExists) fail(`Destination disappeared after approval: ${target.id}`);
   }
+  testPause("after_preflight");
 
+  const routingTemplate = jsonFromBuffer(verifiedSources.get("subagents.json"), "routing template");
   const beforeHashes = new Map();
   for (const target of plan.targets) if (existsSync(target.destination)) beforeHashes.set(target.id, sha256(target.destination));
   const unrelatedAgents = snapshotUnrelatedAgents(configRoot);
@@ -505,6 +541,7 @@ function applyMain(argv) {
 
   writeFileSync(attemptPath, canonical({ plan_id: plan.plan_id, started_at: new Date().toISOString(), approved_sha256: approvedSha256 }), { flag: "wx" });
   const transaction = { files: [], directories: [], operations: [] };
+  const temporaryFiles = new Set();
   const backupById = new Map();
   const existedAtBackup = new Map();
   const hashAtBackup = new Map();
@@ -532,9 +569,25 @@ function applyMain(argv) {
     const existed = existsSync(target.destination);
     if (existed !== existedAtBackup.get(target.id)) fail(`Target changed after backup: ${target.id}`);
     if (existed && sha256(target.destination) !== hashAtBackup.get(target.id)) fail(`Target content changed after backup: ${target.id}`);
+    // Same-directory temporary file (unique random name, exclusive create), verified,
+    // then re-checked and renamed over the destination for the narrowest write window.
+    const tempPath = join(dirname(target.destination), `.install-tmp-${randomBytes(8).toString("hex")}`);
+    try {
+      writeFileSync(tempPath, bytes, { flag: "wx" });
+      temporaryFiles.add(tempPath);
+      if (!readFileSync(tempPath).equals(bytes)) fail(`Temp write verification failed: ${target.id}`);
+      testPause("after_temp_write");
+      containedReal(realpathSync(configRoot), target.destination, `write ${target.id}`);
+      ensureNoSymlink(target.destination, `write ${target.id}`);
+      renameSync(tempPath, target.destination);
+      temporaryFiles.delete(tempPath);
+    } catch (error) {
+      temporaryFiles.delete(tempPath);
+      try { rmSync(tempPath, { force: true }); } catch { /* best-effort cleanup */ }
+      throw error;
+    }
     const backup = backupById.get(target.id) || null;
     transaction.files.push({ id: target.id, path: target.destination, existed, backup });
-    writeFileSync(target.destination, bytes);
     transaction.operations.push({ type: existed ? "replace" : "create", id: target.id, path: target.destination });
     if (existed) {
       replacementCount += 1;
@@ -578,24 +631,26 @@ function applyMain(argv) {
     const manifestPath = join(plan.backup_directory, "manifest.json");
     writeFileSync(manifestPath, canonical({ schema_version: 1, plan_id: plan.plan_id, created_at: new Date().toISOString(), targets: manifestTargets }), { flag: "wx" });
     injectFailure("after_backup");
+    testPause("after_backup");
 
     for (const role of ROLES) {
       const target = plan.targets.find((item) => item.id === `agents/${role}.md`);
       if (!target.may_modify) continue;
-      writeManaged(target, transformAgent(readFileSync(sources[target.id]), plan.request.agents[role], role));
+      writeManaged(target, transformAgent(verifiedSources.get(target.id), plan.request.agents[role], role));
     }
     for (const id of ["extensions/orchestrator-mode/index.ts", "extensions/orchestrator-mode/orchestrator-policy.md"]) {
       const target = plan.targets.find((item) => item.id === id);
-      if (target.may_modify) writeManaged(target, readFileSync(sources[id]));
+      if (target.may_modify) writeManaged(target, verifiedSources.get(id));
     }
     const orchestratorTarget = plan.targets.find((item) => item.id === "orchestrator-mode.json");
     writeManaged(orchestratorTarget, Buffer.from(canonical({ ...orchestratorBefore, defaultEnabled: plan.request.orchestratorDefaultEnabled })));
     if (plan.request.routing === "strict") {
       const routingTarget = plan.targets.find((item) => item.id === "subagents.json");
-      const routingBase = routingBefore ?? readJsonObject(sources["subagents.json"], "routing template", {});
+      const routingBase = routingBefore ?? routingTemplate;
       writeManaged(routingTarget, Buffer.from(canonical({ ...routingBase, disableDefaultAgents: true, fallbackSubagent: "none" })));
     }
     injectFailure("after_json_merge");
+    testPause("after_json_merge");
 
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
     if (manifest.targets.length !== 10 || new Set(manifest.targets.map((item) => item.id)).size !== 10) fail("Manifest target set is invalid");
@@ -603,7 +658,7 @@ function applyMain(argv) {
     for (const role of ROLES) {
       const target = plan.targets.find((item) => item.id === `agents/${role}.md`);
       if (target.may_modify) {
-        const expected = transformAgent(readFileSync(sources[target.id]), plan.request.agents[role], role);
+        const expected = transformAgent(verifiedSources.get(target.id), plan.request.agents[role], role);
         if (!readFileSync(target.destination).equals(expected)) fail(`Installed Agent verification failed: ${role}`);
         const installedText = expected.toString("utf8");
         if (
@@ -616,13 +671,13 @@ function applyMain(argv) {
     }
     for (const id of ["extensions/orchestrator-mode/index.ts", "extensions/orchestrator-mode/orchestrator-policy.md"]) {
       const target = plan.targets.find((item) => item.id === id);
-      if (target.may_modify && sha256(target.destination) !== sha256(sources[id])) fail(`Extension verification failed: ${id}`);
+      if (target.may_modify && !readFileSync(target.destination).equals(verifiedSources.get(id))) fail(`Extension verification failed: ${id}`);
     }
     const actualOrchestrator = readJsonObject(orchestratorTarget.destination, "orchestrator-mode.json", null);
     if (canonical(actualOrchestrator) !== canonical({ ...orchestratorBefore, defaultEnabled: plan.request.orchestratorDefaultEnabled })) fail("Orchestrator verification failed");
     const routingTarget = plan.targets.find((item) => item.id === "subagents.json");
     if (plan.request.routing === "strict") {
-      const routingBase = routingBefore ?? readJsonObject(sources["subagents.json"], "routing template", {});
+      const routingBase = routingBefore ?? routingTemplate;
       if (canonical(readJsonObject(routingTarget.destination, "subagents.json", null)) !== canonical({ ...routingBase, disableDefaultAgents: true, fallbackSubagent: "none" })) fail("Strict routing verification failed");
     } else if (beforeHashes.has(routingTarget.id) ? sha256(routingTarget.destination) !== beforeHashes.get(routingTarget.id) : existsSync(routingTarget.destination)) fail("Compatibility routing changed");
     const settingsTarget = plan.targets.find((item) => item.id === "settings.json");
@@ -644,6 +699,11 @@ function applyMain(argv) {
         }
         if (file.existed) {
           if (!file.backup) throw new Error("Missing verified backup");
+          // Re-check containment and symlink state before restoring: never let
+          // copyFileSync follow a destination or ancestor that became a
+          // symlink/junction after the transaction wrote it.
+          containedReal(realpathSync(configRoot), file.path, `restore ${file.path}`);
+          ensureNoSymlink(file.path, `restore ${file.path}`);
           copyFileSync(file.backup, file.path);
         } else if (existsSync(file.path)) rmSync(file.path, { force: true });
         compensations.push({ type: file.existed ? "restore" : "delete", path: file.path, status: "succeeded" });
@@ -659,6 +719,15 @@ function applyMain(argv) {
       } catch (rollbackError) {
         unresolved.push(directory);
         compensations.push({ type: "remove_empty_directory", path: directory, status: "failed", error: rollbackError.message });
+      }
+    }
+    for (const tempPath of temporaryFiles) {
+      try {
+        rmSync(tempPath, { force: true });
+        compensations.push({ type: "remove_temp_file", path: tempPath, status: "succeeded" });
+      } catch (rollbackError) {
+        unresolved.push(tempPath);
+        compensations.push({ type: "remove_temp_file", path: tempPath, status: "failed", error: rollbackError.message });
       }
     }
     const status = unresolved.length === 0 ? "rolled_back" : "rollback_incomplete";
