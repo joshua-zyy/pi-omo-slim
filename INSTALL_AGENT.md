@@ -4,7 +4,7 @@ This document is the operational contract for an Agent after this repository is 
 
 ## Objective
 
-Install this repository's five Agent definitions and Orchestrator Mode into the user's global Pi configuration without silently overwriting unrelated settings, while keeping every change recoverable.
+Install this repository's Agent definitions and Orchestrator Mode into the user's global Pi configuration, while allowing the user to preserve individual same-name Agent definitions, without silently overwriting unrelated settings and while keeping every change recoverable.
 
 ## Non-negotiable rules
 
@@ -12,8 +12,8 @@ Install this repository's five Agent definitions and Orchestrator Mode into the 
 2. If `PI_CODING_AGENT_DIR` is set, use it as the configuration root. Otherwise, use `.pi/agent` under the current platform's user home directory.
 3. Inspect before modifying.
 4. Before every state-changing shell command, show the user the exact command, affected paths, backup location, and expected effect, then obtain explicit approval.
-5. Never silently overwrite an Agent, extension, or JSON configuration with the same name.
-6. Never replace an existing JSON configuration wholesale. Parse it and update only the properties supplied by this repository.
+5. Never silently overwrite an Agent, extension, or JSON configuration with the same name. Resolve each same-name Agent conflict separately with the user.
+6. Never replace an existing JSON configuration wholesale. Parse it and update only properties the user explicitly approved for this installation.
 7. Do not modify model credentials, providers, model allowlists, unrelated Agents, Pi source code, installed-package source code, or project-local Pi settings.
 8. Do not delete files during installation. Any later cleanup or rollback deletion requires separate explicit approval for exact, verified targets.
 9. Stop on any parsing, copying, dependency-installation, or verification failure. Report the current state and recovery path; do not improvise destructive repairs.
@@ -46,7 +46,7 @@ Complete the following without changing any state:
    - the global Pi configuration root;
    - every destination path.
 2. Read `README.md`, every repository input listed above, and all applicable user and project instructions in full.
-3. Run `pi list` and determine which of these dependencies are already installed:
+3. Run `pi list` and determine which of these dependencies are already installed. Treat an installed `@tintinweb/pi-subagents` package as a dependency state only; it does not prove that this project or its five Agent templates were previously installed:
 
    ```text
    npm:@tintinweb/pi-subagents
@@ -58,7 +58,7 @@ Complete the following without changing any state:
 
 4. Run `pi --list-models` to discover the models currently available in Pi, then prepare the provider/model IDs for the user to choose from. This phase is an availability inventory only. Do not require the repository's Agent templates to contain or resolve any default model, and do not select substitute models during this phase.
 
-5. Inventory the following destinations. For each existing file, record its existence, type, size, modification time, and SHA-256:
+5. Inventory the following destinations. For every target, record whether it exists. For each existing file, also record its type, size, modification time, and SHA-256:
    - `<config-root>/settings.json`;
    - `<config-root>/agents/Explore.md`;
    - `<config-root>/agents/librarian.md`;
@@ -69,8 +69,18 @@ Complete the following without changing any state:
    - `<config-root>/extensions/orchestrator-mode/orchestrator-policy.md`;
    - `<config-root>/orchestrator-mode.json`;
    - `<config-root>/subagents.json`.
-6. Inspect other enabled custom Agents. Explain that this installation does not automatically remove or disable them and that they may remain callable alongside this project's five roles.
-7. If `orchestrator-mode.json` or `subagents.json` already exists, parse each existing file as JSON. Stop if either is invalid or if `orchestrator-mode.json` is not a top-level object.
+6. For each existing same-name Agent destination, compare its SHA-256 with the corresponding repository template. Classify an exact match as already matching this project. Classify a different file as a same-name custom or unknown-origin conflict; do not infer ownership from its name.
+7. Inspect other enabled custom Agents. Explain that this installation does not automatically remove or disable them and that they may remain callable alongside this project's five roles.
+8. If `orchestrator-mode.json` or `subagents.json` already exists, parse each existing file as JSON. Stop if either is invalid or if its top-level value is not an object.
+9. If `subagents.json` exists, record the current presence and value of `disableDefaultAgents` and `fallbackSubagent`. Prepare this field-level comparison without changing the file:
+
+   ```text
+   disableDefaultAgents: <current value or absent> -> true
+   fallbackSubagent: <current value or absent> -> "none"
+   other properties: preserved
+   ```
+
+10. Present a compatibility summary that distinguishes the installed package state, same-name Agent conflicts, unrelated custom Agents, and existing routing configuration. Explicitly warn that strict routing disables package-provided default Agents and makes an unknown Agent type fail instead of falling back.
 
 ## Phase 2: configuration and approval checkpoint
 
@@ -94,13 +104,29 @@ Offer provider-neutral capability guidance rather than recommending or requiring
 
 A thinking level must be either inherited or supported by the current Pi version. Pi may clamp a level that a selected model cannot support. Explain this behavior to the user and do not claim that every model will execute the chosen level exactly.
 
-Regardless of the selected approach, expand the result into an explicit five-row configuration for Explorer, Librarian, Oracle, Designer, and Fixer so the user can review it. Then ask whether Orchestrator Mode should default to enabled or disabled when a session branch has no explicit mode state. Explain that this choice writes only `defaultEnabled` in `<config-root>/orchestrator-mode.json`, affects only this extension, and is overridden by the latest `/orchestrator on` or `/orchestrator off` state recorded in the current session branch.
+Regardless of the selected approach, expand the result into an explicit five-row configuration for Explorer, Librarian, Oracle, Designer, and Fixer so the user can review it.
+
+For every same-name Agent conflict identified in Phase 1, ask the user separately whether to:
+
+- **replace it** — back up the existing file, then install this project's template and apply the approved model and thinking settings; or
+- **keep it** — leave the existing file byte-for-byte unchanged and mark that role as not using this project's template.
+
+Do not use one approval for all same-name conflicts unless the user explicitly chooses the same action for every listed path. An exact template match is not a conflict and may remain in place or be refreshed without being described as a user customization.
+
+Ask the user to choose one routing mode:
+
+1. **Strict mode** — set `disableDefaultAgents` to `true` and `fallbackSubagent` to `"none"`, preserving every unrelated property. Explain the exact field-level changes before approval.
+2. **Compatibility mode** — preserve the existing values or absence of both routing properties. If `subagents.json` does not exist, do not create it. Explain that package-provided default Agents may remain available and unknown Agent types may fall back, so routing does not fully match this project's strict design.
+
+Then ask whether Orchestrator Mode should default to enabled or disabled when a session branch has no explicit mode state. Explain that this choice writes only `defaultEnabled` in `<config-root>/orchestrator-mode.json`, affects only this extension, and is overridden by the latest `/orchestrator on` or `/orchestrator off` state recorded in the current session branch.
 
 After they confirm those choices, present a concise final installation proposal containing:
 
 - the exact repository root and configuration root;
 - the Pi version and available-model inventory;
 - the final model and thinking-level choice for each of the five Subagents, with inherited values explicitly marked as "inherit from parent Agent";
+- the separate replace-or-keep decision for every same-name Agent conflict;
+- the selected routing mode, including the exact two-field diff in strict mode or the compatibility warning in compatibility mode;
 - the selected Orchestrator Mode global default;
 - dependencies already installed and dependencies that still need installation;
 - every destination that will be created or replaced;
@@ -120,15 +146,16 @@ After approval, create one timestamped directory under:
 <config-root>/backups/pi-omo-slim-YYYYMMDD-HHMMSS/
 ```
 
-Back up every existing destination from the Phase 1 inventory, including `settings.json`, while preserving an unambiguous relative layout. Create a `manifest.json` that records for every target:
+Back up every existing destination from the Phase 1 inventory that may be modified by the approved installation, including `settings.json`, while preserving an unambiguous relative layout. Do not create placeholder backup files for absent targets or copy existing same-name Agents that the user chose to keep unchanged. Create a `manifest.json` that records every inventoried target, including absent and unchanged targets:
 
 - its absolute original path;
 - whether it existed before installation;
-- its backup path, or `null` if it was originally absent;
+- whether the approved installation may modify it;
+- its backup path, or `null` if it was originally absent or will remain unchanged;
 - the SHA-256 of each existing file;
 - the backup timestamp.
 
-Before continuing, compare SHA-256 values to verify every copied backup. Do not include credentials or unrelated files in the backup.
+Before continuing, compare SHA-256 values to verify every copied backup. For an absent target, the manifest records its pre-installation absence so a later approved rollback can distinguish a newly created file from a pre-existing one. Do not include credentials or unrelated files in the backup.
 
 ## Phase 4: install missing dependencies
 
@@ -147,7 +174,10 @@ Do not use `--local`, because these roles and the mode are installed globally. S
 ## Phase 5: install repository configuration
 
 1. Create the destination `agents` and `extensions/orchestrator-mode` directories if they do not exist.
-2. Copy the five repository Agent files to their corresponding destination names, then apply the Phase 2 choices only to the destination copies:
+2. Process the five Agent destinations independently:
+   - copy a repository Agent file when its destination is absent, already matches the repository template, or the user explicitly approved replacing that same-name conflict;
+   - leave a same-name conflict byte-for-byte unchanged when the user chose to keep it;
+   - apply the Phase 2 model and thinking choices only to Agent files installed from this project's templates;
    - when the model is set to inherit, do not add `model`; otherwise, add the selected exact model ID;
    - when the thinking level is set to inherit, do not add `thinking`; otherwise, add the selected level;
    - do not modify the repository source files or change any other frontmatter or Prompt content.
@@ -157,18 +187,18 @@ Do not use `--local`, because these roles and the mode are installed globally. S
    - if it exists, parse it as JSON and stop if it is invalid or its top-level value is not an object;
    - set only `defaultEnabled` to the approved boolean and preserve every unrelated property;
    - retain the existing indentation style when practical, and always write valid JSON.
-5. Install strict subagent routing:
-   - if `<config-root>/subagents.json` is absent, create it from `config/subagents.json`;
-   - if it exists, parse it and set only:
+5. Apply the approved routing mode:
+   - in **strict mode**, create `<config-root>/subagents.json` from `config/subagents.json` when absent; otherwise set only:
 
-```json
-{
-  "disableDefaultAgents": true,
-  "fallbackSubagent": "none"
-}
-```
+     ```json
+     {
+       "disableDefaultAgents": true,
+       "fallbackSubagent": "none"
+     }
+     ```
 
-Preserve every unrelated property. Retain the existing indentation style when practical, and always write valid JSON.
+     Preserve every unrelated property, retain the existing indentation style when practical, and always write valid JSON;
+   - in **compatibility mode**, do not create or modify `<config-root>/subagents.json`.
 
 Do not modify existing custom Agents whose names do not conflict with the five repository files. Do not patch `@tintinweb/pi-subagents` or any other installed package.
 
@@ -179,16 +209,18 @@ Review every changed file before running tests. Fix only issues caused by this i
 Verify that:
 
 1. `orchestrator-mode.json` parses as a JSON object and its `defaultEnabled` boolean exactly matches the value approved by the user.
-2. `subagents.json` parses and contains the two strict values.
-3. Each of the five Agent files has exactly two frontmatter delimiters and contains:
+2. Routing matches the approved mode:
+   - in strict mode, `subagents.json` parses and contains the two strict values while preserving unrelated properties;
+   - in compatibility mode, `subagents.json` remains byte-for-byte unchanged if it existed and remains absent if it did not.
+3. For each Agent installed from this project's template, verify that it has exactly two frontmatter delimiters and contains:
    - `prompt_mode: replace`;
    - `skills: false`;
    - `inherit_context: false`;
    - no `allowed_subagents` field.
-   Also verify `model` and `thinking` for every role: inherited settings must omit their fields, while pinned settings must exactly match the configuration approved by the user.
-4. Explorer, Librarian, and Oracle have no write or shell tools.
-5. Designer and Fixer load `pi-extension-safety-guard`.
-6. Every referenced `ext:` tool belongs to an installed extension.
+   Also verify `model` and `thinking` for every installed project role: inherited settings must omit their fields, while pinned settings must exactly match the configuration approved by the user. For every same-name Agent the user chose to keep, verify that its SHA-256 is unchanged and do not apply project-template assertions to it.
+4. Explorer, Librarian, and Oracle use this project's no-write/no-shell tool restrictions only when their project templates were installed; report kept same-name roles separately.
+5. Designer and Fixer load `pi-extension-safety-guard` only when their project templates were installed; report kept same-name roles separately.
+6. Every `ext:` tool referenced by an Agent installed from this project's template belongs to an installed extension; do not apply this assertion to a same-name Agent the user chose to keep.
 7. The current Pi executable can load the mode extension independently, for example by combining `--no-extensions`, an explicit `--extension` path, and `--list-models`.
 8. Installed-package source code and unrelated global settings were not modified, except for package references written by successful `pi install` commands.
 
@@ -200,7 +232,7 @@ Tell the user to restart Pi or start a new Pi session. In that new session, ask 
 /orchestrator off
 ```
 
-In a session branch with no explicit Orchestrator Mode state, the initial state should match the approved `defaultEnabled` value. `/orchestrator on` should display `orchestrator: ON`, while `/orchestrator off` should remove that status and persist the override in the current session branch. Available Agent types should include `Explore`, `librarian`, `oracle`, `designer`, and `fixer`. Calling a definitely unknown type must fail rather than fall back.
+In a session branch with no explicit Orchestrator Mode state, the initial state should match the approved `defaultEnabled` value. `/orchestrator on` should display `orchestrator: ON`, while `/orchestrator off` should remove that status and persist the override in the current session branch. Available Agent types should include `Explore`, `librarian`, `oracle`, `designer`, and `fixer`, while any kept same-name role uses the user's existing definition rather than this project's template. In strict mode, calling a definitely unknown type must fail rather than fall back. In compatibility mode, report the observed fallback behavior without treating fallback as an installation failure.
 
 Do not run Designer or Fixer write smoke tests against a real project. Creating a temporary fixture and deleting it afterward both require separate approval.
 
@@ -210,7 +242,8 @@ Report:
 
 - the configuration root;
 - files created or replaced;
-- the effective model and thinking level for each of the five Subagents;
+- the effective model and thinking level for each installed project Subagent, plus every same-name Agent kept unchanged and therefore not using this project's template;
+- the selected routing mode and, in compatibility mode, the resulting default-Agent and fallback warning;
 - the configured Orchestrator Mode global default;
 - dependencies installed and dependencies already present;
 - the backup directory and manifest path;
