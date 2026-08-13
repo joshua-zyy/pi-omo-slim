@@ -13,7 +13,7 @@ Install this repository's five Agent definitions and Orchestrator Mode into the 
 3. Inspect before modifying.
 4. Before every state-changing shell command, show the user the exact command, affected paths, backup location, and expected effect, then obtain explicit approval.
 5. Never silently overwrite an Agent, extension, or JSON configuration with the same name.
-6. Never replace an existing `subagents.json` wholesale. Parse it and update only the two properties supplied by this repository.
+6. Never replace an existing JSON configuration wholesale. Parse it and update only the properties supplied by this repository.
 7. Do not modify model credentials, providers, model allowlists, unrelated Agents, Pi source code, installed-package source code, or project-local Pi settings.
 8. Do not delete files during installation. Any later cleanup or rollback deletion requires separate explicit approval for exact, verified targets.
 9. Stop on any parsing, copying, dependency-installation, or verification failure. Report the current state and recovery path; do not improvise destructive repairs.
@@ -30,7 +30,8 @@ agents/designer.md
 agents/fixer.md
 extensions/orchestrator-mode/index.ts
 extensions/orchestrator-mode/orchestrator-policy.md
-subagents.json
+config/orchestrator-mode.json.example
+config/subagents.json
 ```
 
 If any input is missing or empty, stop before modifying the user's configuration.
@@ -47,13 +48,13 @@ Complete the following without changing any state:
 2. Read `README.md`, every repository input listed above, and all applicable user and project instructions in full.
 3. Run `pi list` and determine which of these dependencies are already installed:
 
-```text
-npm:@tintinweb/pi-subagents
-npm:@ff-labs/pi-fff
-npm:pi-web-access
-npm:pi-lens
-npm:@firstpick/pi-extension-safety-guard
-```
+   ```text
+   npm:@tintinweb/pi-subagents
+   npm:@ff-labs/pi-fff
+   npm:pi-web-access
+   npm:pi-lens
+   npm:@firstpick/pi-extension-safety-guard
+   ```
 
 4. Run `pi --list-models` to discover the models currently available in Pi, then prepare the provider/model IDs for the user to choose from. This phase is an availability inventory only. Do not require the repository's Agent templates to contain or resolve any default model, and do not select substitute models during this phase.
 
@@ -66,9 +67,10 @@ npm:@firstpick/pi-extension-safety-guard
    - `<config-root>/agents/fixer.md`;
    - `<config-root>/extensions/orchestrator-mode/index.ts`;
    - `<config-root>/extensions/orchestrator-mode/orchestrator-policy.md`;
+   - `<config-root>/orchestrator-mode.json`;
    - `<config-root>/subagents.json`.
 6. Inspect other enabled custom Agents. Explain that this installation does not automatically remove or disable them and that they may remain callable alongside this project's five roles.
-7. If `subagents.json` already exists, parse it as JSON. Stop if it is invalid.
+7. If `orchestrator-mode.json` or `subagents.json` already exists, parse each existing file as JSON. Stop if either is invalid or if `orchestrator-mode.json` is not a top-level object.
 
 ## Phase 2: configuration and approval checkpoint
 
@@ -83,7 +85,7 @@ The model and thinking level may be set to inherit independently. For example, O
 Offer provider-neutral capability guidance rather than recommending or requiring a particular commercial model:
 
 | Subagent | Suggested model characteristics | Suggested thinking level |
-|---|---|---|
+| --- | --- | --- |
 | Explorer | Fast, inexpensive, and reliable at tool use | `low` |
 | Librarian | Reliable with Web tools and longer contexts | `low` |
 | Oracle | A strong reasoning model available in the user's environment | `high` |
@@ -92,11 +94,14 @@ Offer provider-neutral capability guidance rather than recommending or requiring
 
 A thinking level must be either inherited or supported by the current Pi version. Pi may clamp a level that a selected model cannot support. Explain this behavior to the user and do not claim that every model will execute the chosen level exactly.
 
-Regardless of the selected approach, expand the result into an explicit five-row configuration for Explorer, Librarian, Oracle, Designer, and Fixer so the user can review it. After they confirm those choices, present a concise final installation proposal containing:
+Regardless of the selected approach, expand the result into an explicit five-row configuration for Explorer, Librarian, Oracle, Designer, and Fixer so the user can review it. Then ask whether Orchestrator Mode should default to enabled or disabled when a session branch has no explicit mode state. Explain that this choice writes only `defaultEnabled` in `<config-root>/orchestrator-mode.json`, affects only this extension, and is overridden by the latest `/orchestrator on` or `/orchestrator off` state recorded in the current session branch.
+
+After they confirm those choices, present a concise final installation proposal containing:
 
 - the exact repository root and configuration root;
 - the Pi version and available-model inventory;
 - the final model and thinking-level choice for each of the five Subagents, with inherited values explicitly marked as "inherit from parent Agent";
+- the selected Orchestrator Mode global default;
 - dependencies already installed and dependencies that still need installation;
 - every destination that will be created or replaced;
 - same-name conflicts and how each will be backed up;
@@ -147,8 +152,13 @@ Do not use `--local`, because these roles and the mode are installed globally. S
    - when the thinking level is set to inherit, do not add `thinking`; otherwise, add the selected level;
    - do not modify the repository source files or change any other frontmatter or Prompt content.
 3. Copy both Orchestrator Mode files to the destination extension directory.
-4. Install strict subagent routing:
-   - if `<config-root>/subagents.json` is absent, create it from the repository template;
+4. Install the Orchestrator Mode global configuration:
+   - if `<config-root>/orchestrator-mode.json` is absent, create it from `config/orchestrator-mode.json.example` and set `defaultEnabled` to the boolean approved in Phase 2;
+   - if it exists, parse it as JSON and stop if it is invalid or its top-level value is not an object;
+   - set only `defaultEnabled` to the approved boolean and preserve every unrelated property;
+   - retain the existing indentation style when practical, and always write valid JSON.
+5. Install strict subagent routing:
+   - if `<config-root>/subagents.json` is absent, create it from `config/subagents.json`;
    - if it exists, parse it and set only:
 
 ```json
@@ -168,27 +178,29 @@ Review every changed file before running tests. Fix only issues caused by this i
 
 Verify that:
 
-1. `subagents.json` parses and contains the two strict values.
-2. Each of the five Agent files has exactly two frontmatter delimiters and contains:
+1. `orchestrator-mode.json` parses as a JSON object and its `defaultEnabled` boolean exactly matches the value approved by the user.
+2. `subagents.json` parses and contains the two strict values.
+3. Each of the five Agent files has exactly two frontmatter delimiters and contains:
    - `prompt_mode: replace`;
    - `skills: false`;
    - `inherit_context: false`;
    - no `allowed_subagents` field.
    Also verify `model` and `thinking` for every role: inherited settings must omit their fields, while pinned settings must exactly match the configuration approved by the user.
-3. Explorer, Librarian, and Oracle have no write or shell tools.
-4. Designer and Fixer load `pi-extension-safety-guard`.
-5. Every referenced `ext:` tool belongs to an installed extension.
-6. The current Pi executable can load the mode extension independently, for example by combining `--no-extensions`, an explicit `--extension` path, and `--list-models`.
-7. Installed-package source code and unrelated global settings were not modified, except for package references written by successful `pi install` commands.
+4. Explorer, Librarian, and Oracle have no write or shell tools.
+5. Designer and Fixer load `pi-extension-safety-guard`.
+6. Every referenced `ext:` tool belongs to an installed extension.
+7. The current Pi executable can load the mode extension independently, for example by combining `--no-extensions`, an explicit `--extension` path, and `--list-models`.
+8. Installed-package source code and unrelated global settings were not modified, except for package references written by successful `pi install` commands.
 
 Tell the user to restart Pi or start a new Pi session. In that new session, ask them to verify:
 
 ```text
 /orchestrator status
 /orchestrator on
+/orchestrator off
 ```
 
-The initial state in a new session should be off. Enabling the mode should display `orchestrator: ON`. Available Agent types should include `Explore`, `librarian`, `oracle`, `designer`, and `fixer`. Calling a definitely unknown type must fail rather than fall back.
+In a session branch with no explicit Orchestrator Mode state, the initial state should match the approved `defaultEnabled` value. `/orchestrator on` should display `orchestrator: ON`, while `/orchestrator off` should remove that status and persist the override in the current session branch. Available Agent types should include `Explore`, `librarian`, `oracle`, `designer`, and `fixer`. Calling a definitely unknown type must fail rather than fall back.
 
 Do not run Designer or Fixer write smoke tests against a real project. Creating a temporary fixture and deleting it afterward both require separate approval.
 
@@ -199,6 +211,7 @@ Report:
 - the configuration root;
 - files created or replaced;
 - the effective model and thinking level for each of the five Subagents;
+- the configured Orchestrator Mode global default;
 - dependencies installed and dependencies already present;
 - the backup directory and manifest path;
 - verification results;

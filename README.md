@@ -46,9 +46,10 @@ If you prefer to configure Pi yourself:
 2. Copy `agents/*.md` to Pi's global `agents` directory.
    Leave `model` and `thinking` omitted to inherit from the parent Agent. If you want pinned settings, modify only the destination copies.
 3. Copy `extensions/orchestrator-mode` to Pi's global `extensions` directory.
-4. Merge the two properties from `subagents.json` into the global file of the same name without overwriting unrelated settings.
-5. Restart Pi so that `pi-subagents` rebuilds its Agent type list.
-6. Run `/orchestrator status`, then `/orchestrator on`.
+4. Optionally create `<config-root>/orchestrator-mode.json` from `config/orchestrator-mode.json.example`. Set `defaultEnabled` to `true` to enable Orchestrator Mode by default in sessions that have no explicit mode state.
+5. Merge the two properties from `config/subagents.json` into `<config-root>/subagents.json` without overwriting unrelated settings.
+6. Restart Pi so that `pi-subagents` rebuilds its Agent type list.
+7. Run `/orchestrator status`; use `/orchestrator on` or `/orchestrator off` to override the mode for the current session branch.
 
 The default global configuration directory is `~/.pi/agent`. If `PI_CODING_AGENT_DIR` is set, Pi uses the directory specified by that environment variable instead.
 
@@ -63,7 +64,17 @@ Always back up existing files before copying or merging. In particular, never si
 /orchestrator status   Show its current state
 ```
 
-New sessions default to off. The extension records its state in the Pi session and restores the latest state from the current session branch.
+The optional global configuration file is `<config-root>/orchestrator-mode.json`:
+
+```json
+{
+  "defaultEnabled": true
+}
+```
+
+`defaultEnabled` affects only this Orchestrator Mode extension; it does not enable or disable any other Pi extension. When the file or property is absent, the global default is `false`. Invalid JSON or a non-boolean value produces a warning and also falls back to `false`. After editing the file, run `/reload` or restart Pi so the extension reloads the configuration.
+
+The effective state priority is: the latest explicit state in the current session branch, then `defaultEnabled`, then `false`. Consequently, `defaultEnabled: true` enables the mode when Pi opens a new session or switches to a session with no recorded mode state. A session branch that previously ran `/orchestrator on` or `/orchestrator off` retains that explicit state.
 
 ## Differences from OMO-slim on OpenCode
 
@@ -75,8 +86,8 @@ Designer and Fixer can write files and run shell commands. The Safety Guard exte
 
 ```text
 agents/                         Five pi-subagents Agent definitions
+config/                         Installation configuration templates
 extensions/orchestrator-mode/  Mode commands, state handling, and policy
-subagents.json                  Strict routing settings to merge
 INSTALL_AGENT.md                Installation procedure for a Pi Agent
 ```
 
@@ -93,7 +104,7 @@ The upstream copyright notice and MIT terms are retained in [LICENSE](LICENSE).
 This project asks users to install, but does not vendor, the following independently maintained Pi packages. When this project was prepared, the tested versions below each declared the MIT License:
 
 | Package | Tested version | Upstream repository |
-|---|---:|---|
+| --- | ---: | --- |
 | `@tintinweb/pi-subagents` | 0.15.0 | <https://github.com/tintinweb/pi-subagents> |
 | `@ff-labs/pi-fff` | 0.10.3 | <https://github.com/dmtrKovalenko/fff> |
 | `pi-web-access` | 0.21.0 | <https://github.com/nicobailon/pi-web-access> |

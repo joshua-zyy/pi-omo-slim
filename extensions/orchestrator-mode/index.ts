@@ -1,14 +1,26 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+	getAgentDir,
+	type ExtensionAPI,
+	type ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 
 const STATE_ENTRY = "orchestrator-mode";
 const STATUS_KEY = "orchestrator-mode";
-const POLICY_PATH = join(dirname(fileURLToPath(import.meta.url)), "orchestrator-policy.md");
+const POLICY_PATH = join(
+	dirname(fileURLToPath(import.meta.url)),
+	"orchestrator-policy.md",
+);
+const CONFIG_PATH = join(getAgentDir(), "orchestrator-mode.json");
 
 type OrchestratorState = {
 	enabled: boolean;
+};
+
+type OrchestratorConfig = {
+	defaultEnabled?: boolean;
 };
 
 function loadPolicy(): { policy?: string; error?: string } {
@@ -20,26 +32,78 @@ function loadPolicy(): { policy?: string; error?: string } {
 		return { policy };
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
-		return { error: `Unable to read orchestrator policy at ${POLICY_PATH}: ${message}` };
+		return {
+			error: `Unable to read orchestrator policy at ${POLICY_PATH}: ${message}`,
+		};
+	}
+}
+
+function loadConfig(): { defaultEnabled: boolean; error?: string } {
+	try {
+		const config = JSON.parse(
+			readFileSync(CONFIG_PATH, "utf8"),
+		) as OrchestratorConfig | null;
+		if (!config || typeof config !== "object" || Array.isArray(config)) {
+			return {
+				defaultEnabled: false,
+				error: `Expected a JSON object in ${CONFIG_PATH}`,
+			};
+		}
+		if (
+			config.defaultEnabled !== undefined &&
+			typeof config.defaultEnabled !== "boolean"
+		) {
+			return {
+				defaultEnabled: false,
+				error: `defaultEnabled must be a boolean in ${CONFIG_PATH}`,
+			};
+		}
+		return { defaultEnabled: config.defaultEnabled ?? false };
+	} catch (error) {
+		if (
+			error &&
+			typeof error === "object" &&
+			"code" in error &&
+			error.code === "ENOENT"
+		) {
+			return { defaultEnabled: false };
+		}
+		const message = error instanceof Error ? error.message : String(error);
+		return {
+			defaultEnabled: false,
+			error: `Unable to read orchestrator config at ${CONFIG_PATH}: ${message}`,
+		};
 	}
 }
 
 export default function orchestratorModeExtension(pi: ExtensionAPI) {
 	const loaded = loadPolicy();
-	let enabled = false;
+	const config = loadConfig();
+	let enabled = config.defaultEnabled;
 
 	const updateStatus = (ctx: ExtensionContext) => {
 		if (!ctx.hasUI) return;
 		ctx.ui.setStatus(STATUS_KEY, enabled ? "orchestrator: ON" : undefined);
 	};
 
-	const notify = (ctx: ExtensionContext, message: string, level: "info" | "warning" | "error" = "info") => {
+	const notify = (
+		ctx: ExtensionContext,
+		message: string,
+		level: "info" | "warning" | "error" = "info",
+	) => {
 		if (!ctx.hasUI) return;
 		ctx.ui.notify(message, level);
 	};
 
 	const restoreState = (ctx: ExtensionContext) => {
-		enabled = false;
+		enabled = config.defaultEnabled;
+
+		if (config.error)
+			notify(
+				ctx,
+				`${config.error}; using false as the global default.`,
+				"warning",
+			);
 
 		for (const entry of ctx.sessionManager.getBranch()) {
 			if (entry.type !== "custom" || entry.customType !== STATE_ENTRY) continue;
@@ -49,7 +113,11 @@ export default function orchestratorModeExtension(pi: ExtensionAPI) {
 
 		if (enabled && !loaded.policy) {
 			enabled = false;
-			notify(ctx, loaded.error ?? "Orchestrator policy is unavailable; mode remains off.", "error");
+			notify(
+				ctx,
+				loaded.error ?? "Orchestrator policy is unavailable; mode remains off.",
+				"error",
+			);
 		}
 
 		updateStatus(ctx);
@@ -59,7 +127,11 @@ export default function orchestratorModeExtension(pi: ExtensionAPI) {
 		if (next && !loaded.policy) {
 			enabled = false;
 			updateStatus(ctx);
-			notify(ctx, loaded.error ?? "Orchestrator policy is unavailable; mode remains off.", "error");
+			notify(
+				ctx,
+				loaded.error ?? "Orchestrator policy is unavailable; mode remains off.",
+				"error",
+			);
 			return;
 		}
 
