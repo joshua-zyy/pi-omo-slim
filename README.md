@@ -24,6 +24,7 @@ This project is a configuration bundle. It does not fork Pi, `pi-subagents`, or 
   - `pi-web-access`
   - `pi-lens`
   - `@firstpick/pi-extension-safety-guard`
+  - `@narumitw/pi-chrome-devtools`
 
 The Agent templates in this repository do not pin a provider, model, or thinking level. By default, they inherit those settings from the parent Agent. During installation, you can choose to inherit everything, apply one shared configuration to all six roles, or configure each role separately. Any pinned model must be selected from the models available in your current Pi environment. The installing Agent modifies only the copies written to your Pi configuration directory, never the source templates in this repository.
 
@@ -41,7 +42,7 @@ Repository cloning and Pi configuration installation are two separate approval c
 
 ## Deterministic installation outline
 
-Install the five required packages separately before planning. Then create the closed `request.json` documented in `INSTALL_AGENT.md` and run:
+Install the six required packages separately before planning. Then create the closed `request.json` documented in `INSTALL_AGENT.md` and run:
 
 ```text
 node scripts/install.mjs plan --request <absolute-request.json> --config-root <absolute-config-root>
@@ -110,6 +111,7 @@ This project asks users to install, but does not vendor, the following independe
 | `pi-web-access` | 0.21.0 | <https://github.com/nicobailon/pi-web-access> |
 | `pi-lens` | 3.8.74 | <https://github.com/apmantza/pi-lens> |
 | `@firstpick/pi-extension-safety-guard` | 0.2.7 | <https://github.com/Firstp1ck/pi-coding-agent-forge> |
+| `@narumitw/pi-chrome-devtools` | 0.52.0 | <https://github.com/narumiruna/pi-extensions/tree/main/packages/pi-chrome-devtools> |
 
 These dependencies remain subject to their respective upstream licenses. The authoritative license and notices are those included with the versions users actually install.
 

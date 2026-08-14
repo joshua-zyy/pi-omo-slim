@@ -7,7 +7,7 @@ This document is the operational contract for an Agent after this repository is 
 1. Resolve the repository root, Pi executable, and actual absolute Pi configuration root. If `PI_CODING_AGENT_DIR` is set, use it; otherwise confirm the platform's global Pi configuration directory with the user.
 2. Inspect before changing state. Do not overwrite or update an existing clone or Pi configuration without the approval required below.
 3. Use `scripts/install.mjs` as the only installation entry point. Do not create ad hoc Shell, JavaScript, Python, or other installation, backup, verification, or rollback programs.
-4. The installer never installs or removes packages. All five dependencies must already be present:
+4. The installer never installs or removes packages. All six dependencies must already be present:
 
    ```text
    npm:@tintinweb/pi-subagents
@@ -15,6 +15,7 @@ This document is the operational contract for an Agent after this repository is 
    npm:pi-web-access
    npm:pi-lens
    npm:@firstpick/pi-extension-safety-guard
+   npm:@narumitw/pi-chrome-devtools
    ```
 
 5. If a dependency is missing, stop. Show only the missing fixed `pi install npm:<package>` commands, obtain separate approval, run them, and then generate a new plan.

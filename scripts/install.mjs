@@ -33,6 +33,7 @@ const DEPENDENCIES = [
   "npm:pi-web-access",
   "npm:pi-lens",
   "npm:@firstpick/pi-extension-safety-guard",
+  "npm:@narumitw/pi-chrome-devtools",
 ];
 const THINKING = new Set(["inherit", "off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const SUPPORTED_THINKING_LEVELS = [...THINKING].filter((level) => level !== "inherit");
