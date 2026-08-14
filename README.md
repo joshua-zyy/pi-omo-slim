@@ -79,7 +79,7 @@ The effective state priority is: the latest explicit state in the current sessio
 
 This project is an adaptation and does not claim complete runtime parity. Pi's `Agent`, `get_subagent_result`, and `steer_subagent` mechanisms cover the main workflow, but they do not reproduce every OMO-slim/OpenCode facility exactly. Although `pi-subagents` also provides `resume`, this project treats completed specialist sessions as terminal and does not depend on session reuse. In particular, this project does not claim to provide OMO-slim's Background Job Board, Wake Scheduler, or identical task-cancellation behavior.
 
-Designer and Fixer can write files and run shell commands. Verifier has no file-writing tools but can run bounded shell validation. The Safety Guard extension is an additional lifecycle defense, not an operating-system sandbox or a substitute for user approval and project-specific instructions.
+Designer and Fixer can write files and run shell commands. Oracle and Verifier have no file-writing tools but can run bounded shell diagnostics or validation. The Safety Guard extension is an additional lifecycle defense, not an operating-system sandbox or a substitute for user approval and project-specific instructions.
 
 ## Project layout
 

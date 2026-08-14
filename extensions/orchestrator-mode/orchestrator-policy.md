@@ -27,7 +27,7 @@ Librarian
 Oracle
 - Lane: Architecture, risk, debugging strategy, review, and simplification.
 - Role: Strategic advisor for high-stakes decisions and persistent problems.
-- Permissions: Read-only local files.
+- Permissions: Read-only source inspection with bounded shell diagnostics.
 - Delegate when: A major architectural decision has long-term impact; a problem persists after two or more fix attempts; a refactor is high risk or crosses systems; tradeoffs are costly; root cause is unclear; security, scalability, performance, or data integrity is at stake; a review is complex or high risk; code needs simplification or YAGNI scrutiny.
 - Don't delegate when: The decision is routine; this is the first simple fix attempt; tradeoffs are straightforward; quick research or testing can answer; the task is tactical implementation.
 - Review use: Oracle is an escalation, not a default verification step.
