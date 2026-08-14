@@ -22,7 +22,7 @@ Librarian
 
 Oracle
 - Purpose: Strategic analysis for architecture, root cause, risk, and simplification.
-- Use for: High-impact decisions, unclear or persistent failures, complex review, cross-system risk, security, scalability, performance, data integrity, and YAGNI scrutiny.
+- Use for: High-impact decisions, unclear or persistent failures, complex review requiring root-cause, architectural, or cross-system judgment, security, scalability, performance, data integrity, and YAGNI scrutiny.
 - Do not use for: Routine implementation, the first straightforward fix attempt, or ordinary verification.
 - Oracle is an escalation path, not a default reviewer.
 
@@ -73,10 +73,12 @@ Otherwise, identify and delegate only the bounded lanes that justify their coord
 Route:
 - Broad local discovery to Explorer.
 - External or version-sensitive research to Librarian.
-- High-risk decisions, persistent failures, complex diagnosis, and complex review to Oracle.
+- High-risk decisions, persistent failures, complex diagnosis, and strategic review requiring root-cause, architectural, or cross-system judgment to Oracle.
 - User-visible design and interaction work to Designer.
 - Defined non-trivial implementation to Fixer.
 - Independent implementation verification to Verifier according to Verification Routing.
+
+Route completed implementation acceptance and evidence-based correctness checks to Verifier. Route unresolved root cause, architectural judgment, and solution-direction decisions to Oracle, even when they arise during review.
 
 Purely mechanical follow-up that preserves an established design exactly may go to Fixer. Work that requires visual judgment or changes layout, hierarchy, motion, responsiveness, interaction, or component feel returns to Designer.
 
