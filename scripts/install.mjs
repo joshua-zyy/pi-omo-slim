@@ -17,7 +17,7 @@ import {
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROLES = ["Explore", "librarian", "oracle", "designer", "fixer"];
+const ROLES = ["Explore", "librarian", "oracle", "designer", "fixer", "verifier"];
 const AGENT_IDS = ROLES.map((role) => `agents/${role}.md`);
 const TARGET_IDS = [
   ...AGENT_IDS,
@@ -142,7 +142,7 @@ function validateRequest(request) {
   if (!["strict", "compatibility"].includes(request.routing)) fail("routing must be strict or compatibility");
   if (typeof request.orchestratorDefaultEnabled !== "boolean") fail("orchestratorDefaultEnabled must be boolean");
   assertObject(request.agents, "agents");
-  if (Object.keys(request.agents).length !== ROLES.length || ROLES.some((role) => !(role in request.agents))) fail("agents must contain exactly the five required roles");
+  if (Object.keys(request.agents).length !== ROLES.length || ROLES.some((role) => !(role in request.agents))) fail(`agents must contain exactly ${ROLES.length} required roles`);
   for (const role of ROLES) {
     const choice = request.agents[role];
     assertObject(choice, `agents.${role}`);
@@ -399,7 +399,7 @@ function validatePlan(plan, planPath) {
     const model = plan.request.agents[role].model;
     if (model !== "inherit" && (!MODEL_ID_RE.test(model) || !plan.pi.models.includes(model))) fail(`Invalid pinned model in plan for ${role}`);
   }
-  if (!Array.isArray(plan.targets) || plan.targets.length !== TARGET_IDS.length) fail("Plan must contain exactly ten targets");
+  if (!Array.isArray(plan.targets) || plan.targets.length !== TARGET_IDS.length) fail(`Plan must contain exactly ${TARGET_IDS.length} targets`);
   const targetIds = plan.targets.map((target) => target?.id);
   if (new Set(targetIds).size !== TARGET_IDS.length || TARGET_IDS.some((id) => !targetIds.includes(id))) fail("Plan target IDs are invalid");
   const sources = expectedSourceMap(repositoryRoot);
@@ -653,7 +653,7 @@ function applyMain(argv) {
     testPause("after_json_merge");
 
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-    if (manifest.targets.length !== 10 || new Set(manifest.targets.map((item) => item.id)).size !== 10) fail("Manifest target set is invalid");
+    if (manifest.targets.length !== TARGET_IDS.length || new Set(manifest.targets.map((item) => item.id)).size !== TARGET_IDS.length) fail("Manifest target set is invalid");
     for (const item of manifest.targets) if (item.backup_path && sha256(item.backup_path) !== item.backup_sha256) fail(`Backup hash mismatch: ${item.id}`);
     for (const role of ROLES) {
       const target = plan.targets.find((item) => item.id === `agents/${role}.md`);

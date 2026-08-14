@@ -1,16 +1,17 @@
 # pi-omo-slim
 
-![pi-omo-slim — a Pi orchestrator connected to five specialist agents](assets/pi-omo-slim-banner.png)
+![pi-omo-slim — a Pi orchestrator connected to six specialist agents](assets/pi-omo-slim-banner.png)
 
 An unofficial, lightweight OMO-slim-style orchestration setup for [Pi](https://github.com/earendil-works/pi).
 
-`pi-omo-slim` gives Pi a workflow-oriented Orchestrator and five focused specialist agents:
+`pi-omo-slim` gives Pi a workflow-oriented Orchestrator and six focused specialist agents:
 
 - **Explorer** — local codebase reconnaissance;
 - **Librarian** — external documentation and library research;
 - **Oracle** — architecture, debugging strategy, review, and simplification;
 - **Designer** — UI/UX design, review, and implementation;
-- **Fixer** — bounded, non-visual implementation.
+- **Fixer** — bounded, non-visual implementation;
+- **Verifier** — independent review and bounded validation of completed Fixer work.
 
 This project is a configuration bundle. It does not fork Pi, `pi-subagents`, or OMO-slim. It adapts OMO-slim's role boundaries and orchestration approach to the extension and subagent APIs that Pi actually provides.
 
@@ -24,7 +25,7 @@ This project is a configuration bundle. It does not fork Pi, `pi-subagents`, or 
   - `pi-lens`
   - `@firstpick/pi-extension-safety-guard`
 
-The Agent templates in this repository do not pin a provider, model, or thinking level. By default, they inherit those settings from the parent Agent. During installation, you can choose to inherit everything, apply one shared configuration to all five roles, or configure each role separately. Any pinned model must be selected from the models available in your current Pi environment. The installing Agent modifies only the copies written to your Pi configuration directory, never the source templates in this repository.
+The Agent templates in this repository do not pin a provider, model, or thinking level. By default, they inherit those settings from the parent Agent. During installation, you can choose to inherit everything, apply one shared configuration to all six roles, or configure each role separately. Any pinned model must be selected from the models available in your current Pi environment. The installing Agent modifies only the copies written to your Pi configuration directory, never the source templates in this repository.
 
 ## Recommended installation
 
@@ -76,14 +77,14 @@ The effective state priority is: the latest explicit state in the current sessio
 
 ## Differences from OMO-slim on OpenCode
 
-This project is an adaptation and does not claim complete runtime parity. Pi's `Agent`, `get_subagent_result`, `steer_subagent`, and `resume` mechanisms cover the main workflow, but they do not reproduce every OMO-slim/OpenCode facility exactly. In particular, this project does not claim to provide OMO-slim's Background Job Board, Wake Scheduler, or identical task-cancellation behavior.
+This project is an adaptation and does not claim complete runtime parity. Pi's `Agent`, `get_subagent_result`, and `steer_subagent` mechanisms cover the main workflow, but they do not reproduce every OMO-slim/OpenCode facility exactly. Although `pi-subagents` also provides `resume`, this project treats completed specialist sessions as terminal and does not depend on session reuse. In particular, this project does not claim to provide OMO-slim's Background Job Board, Wake Scheduler, or identical task-cancellation behavior.
 
-Designer and Fixer can write files and run shell commands. The Safety Guard extension is an additional lifecycle defense, not an operating-system sandbox or a substitute for user approval and project-specific instructions.
+Designer and Fixer can write files and run shell commands. Verifier has no file-writing tools but can run bounded shell validation. The Safety Guard extension is an additional lifecycle defense, not an operating-system sandbox or a substitute for user approval and project-specific instructions.
 
 ## Project layout
 
 ```text
-agents/                         Five pi-subagents Agent definitions
+agents/                         Six pi-subagents Agent definitions
 config/                         Installation configuration templates
 extensions/orchestrator-mode/  Mode commands, state handling, and policy
 scripts/install.mjs             Deterministic plan/apply/verify/rollback installer
