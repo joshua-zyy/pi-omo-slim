@@ -94,7 +94,7 @@ Goals are always user-initiated. You must explicitly run a native `pi-goal` comm
 The Orchestrator never auto-starts a Goal, and this project provides no UltraGoal and no automatic Goal conversion.
 
 - In the default mode, `/goal` follows `pi-goal`'s native workflow only; the Orchestrator's Wave discipline is not applied.
-- In Orchestrator Mode, `/goal` keeps `pi-goal`'s native semantics and additionally gains current-Wave checkpoints, background-subagent waiting coordination, and the existing risk routing.
+- In Orchestrator Mode, `/goal` keeps `pi-goal`'s native semantics and additionally biases separable work toward parallel background specialist lanes, with one current-Wave checkpoint, background-subagent waiting coordination, and the existing risk routing.
 
 `rpiv-todo` maintains only the current Wave/stage checkpoint; it does not track every subagent's live status, which remains authoritative in Pi's Agent tools. The Orchestrator policy is a prompt-level behavior contract, not a mandatory state machine that replaces `pi-goal`'s or `rpiv-todo`'s runtime validation.
 

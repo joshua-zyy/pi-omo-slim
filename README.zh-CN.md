@@ -94,7 +94,7 @@ Goal 始终由用户显式启动。你必须显式运行 `pi-goal` 原生命令�
 Orchestrator 永远不会自动启动 Goal；本项目不提供 UltraGoal，也没有自动 Goal 转换。
 
 - 默认模式下，`/goal` 只遵循 `pi-goal` 原生工作流，不应用 Orchestrator 的 Wave 纪律。
-- Orchestrator Mode 下，`/goal` 保持 `pi-goal` 原生语义，并额外获得当前 Wave 检查点、后台 subagent 等待协调与既有风险路由。
+- Orchestrator Mode 下，`/goal` 保持 `pi-goal` 原生语义，并额外倾向把可独立进行的工作拆成并行的后台专家 lane，同时提供单一当前 Wave 检查点、后台 subagent 等待协调与既有风险路由。
 
 `rpiv-todo` 只维护当前 Wave/阶段检查点，不实时跟踪每个 subagent 的状态；subagent 实时状态仍以 Pi 的 Agent 工具为准。Orchestrator policy 是提示词层面的行为约束，不是替代 `pi-goal` 或 `rpiv-todo` 运行时校验的强制状态机。
 
