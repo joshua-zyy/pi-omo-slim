@@ -19,7 +19,7 @@ This project is a configuration bundle. It does not fork Pi, `pi-subagents`, or 
 
 ## Requirements
 
-- Pi; currently tested with **0.83.0**;
+- Pi; requires **>= 0.80.6** because `@narumitw/pi-goal` depends on Pi's `agent_settled` lifecycle; this release was integration-accepted with **0.84.2** (the repository's `@earendil-works/pi-coding-agent` dev dependency is not changed);
 - the following Pi packages:
   - `@tintinweb/pi-subagents`
   - `@ff-labs/pi-fff`
@@ -27,6 +27,8 @@ This project is a configuration bundle. It does not fork Pi, `pi-subagents`, or 
   - `pi-lens`
   - `@firstpick/pi-extension-safety-guard`
   - `@narumitw/pi-chrome-devtools`
+  - `@narumitw/pi-goal`
+  - `@juicesharp/rpiv-todo`
 
 The Agent templates in this repository do not pin a provider, model, or thinking level. By default, they inherit those settings from the parent Agent. During installation, you can choose to inherit everything, apply one shared configuration to all six roles, or configure each role separately. Any pinned model must be selected from the models available in your current Pi environment. The installing Agent modifies only the copies written to your Pi configuration directory, never the source templates in this repository.
 
@@ -44,7 +46,7 @@ Repository cloning and Pi configuration installation are two separate approval c
 
 ## Deterministic installation outline
 
-Install the six required packages separately before planning. Then create the closed `request.json` documented in `INSTALL_AGENT.md` and run:
+Install the eight required packages separately before planning. Then create the closed `request.json` documented in `INSTALL_AGENT.md` and run:
 
 ```text
 node scripts/install.mjs plan --request <absolute-request.json> --config-root <absolute-config-root>
@@ -77,6 +79,28 @@ The optional global configuration file is `<config-root>/orchestrator-mode.json`
 `defaultEnabled` affects only this Orchestrator Mode extension; it does not enable or disable any other Pi extension. When the file or property is absent, the global default is `false`. Invalid JSON or a non-boolean value produces a warning and also falls back to `false`. After editing the file, run `/reload` or restart Pi so the extension reloads the configuration.
 
 The effective state priority is: the latest explicit state in the current session branch, then `defaultEnabled`, then `false`. Consequently, `defaultEnabled: true` enables the mode when Pi opens a new session or switches to a session with no recorded mode state. A session branch that previously ran `/orchestrator on` or `/orchestrator off` retains that explicit state.
+
+## Goal integration
+
+`@juicesharp/rpiv-todo` is a fixed dependency, so after installation all modes gain its native `todo` tool, `/todos` UI, and default guidance.
+
+Goals are always user-initiated. You must explicitly run a native `pi-goal` command, for example:
+
+```text
+/goal <objective>
+/goal --tokens 100k <objective>
+```
+
+The Orchestrator never auto-starts a Goal, and this project provides no UltraGoal and no automatic Goal conversion.
+
+- In the default mode, `/goal` follows `pi-goal`'s native workflow only; the Orchestrator's Wave discipline is not applied.
+- In Orchestrator Mode, `/goal` keeps `pi-goal`'s native semantics and additionally gains current-Wave checkpoints, background-subagent waiting coordination, and the existing risk routing.
+
+`rpiv-todo` maintains only the current Wave/stage checkpoint; it does not track every subagent's live status, which remains authoritative in Pi's Agent tools. The Orchestrator policy is a prompt-level behavior contract, not a mandatory state machine that replaces `pi-goal`'s or `rpiv-todo`'s runtime validation.
+
+`pi-goal`'s native token budget counts only assistant usage in the main session branch; it does not include the independent subagent sessions the Orchestrator dispatches. This project does not aggregate those usages, and `/goal --tokens` is not a total cap that covers specialist consumption. The number of lanes or `max_turns` is not a token-budget substitute.
+
+`@juicesharp/rpiv-i18n` is an optional peer of `rpiv-todo`; without it the UI falls back to English and todo functionality is unaffected. This project never writes `rpiv-todo` guidance configuration; you keep the upstream defaults and the right to configure it yourself.
 
 ## Differences from OMO-slim on OpenCode
 
@@ -114,6 +138,8 @@ This project asks users to install, but does not vendor, the following independe
 | `pi-lens` | 3.8.74 | <https://github.com/apmantza/pi-lens> |
 | `@firstpick/pi-extension-safety-guard` | 0.2.7 | <https://github.com/Firstp1ck/pi-coding-agent-forge> |
 | `@narumitw/pi-chrome-devtools` | 0.52.0 | <https://github.com/narumiruna/pi-extensions/tree/main/packages/pi-chrome-devtools> |
+| `@narumitw/pi-goal` | 0.51.0 | <https://github.com/narumiruna/pi-extensions> |
+| `@juicesharp/rpiv-todo` | 2.6.0 | <https://github.com/juicesharp/rpiv-mono> |
 
 These dependencies remain subject to their respective upstream licenses. The authoritative license and notices are those included with the versions users actually install.
 

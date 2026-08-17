@@ -19,7 +19,7 @@
 
 ## 环境要求
 
-- Pi；当前测试版本为 **0.83.0**；
+- Pi；要求 **>= 0.80.6**，因为 `@narumitw/pi-goal` 依赖 Pi 的 `agent_settled` 生命周期；本次发布以 **0.84.2** 完成集成验收（仓库的 `@earendil-works/pi-coding-agent` dev dependency 不因此修改）；
 - 以下 Pi 包：
   - `@tintinweb/pi-subagents`
   - `@ff-labs/pi-fff`
@@ -27,6 +27,8 @@
   - `pi-lens`
   - `@firstpick/pi-extension-safety-guard`
   - `@narumitw/pi-chrome-devtools`
+  - `@narumitw/pi-goal`
+  - `@juicesharp/rpiv-todo`
 
 本仓库中的 Agent 模板不固定 provider、模型或思考级别。默认情况下，它们继承父 Agent 的这些设置。安装期间，你可以选择全部继承、为六个角色统一应用一份共享配置，或为每个角色单独配置。任何固定的模型都必须选自你当前 Pi 环境中可用的模型。安装 Agent 只修改写入你 Pi 配置目录的副本，绝不修改本仓库中的源模板。
 
@@ -44,7 +46,7 @@ Agent 会询问仓库的存放位置，在获得确切克隆命令的批准后�
 
 ## 确定性安装概要
 
-先分别安装上述六个必需包，再制定计划。随后创建 `INSTALL_AGENT.md` 中记载的封闭式 `request.json`，并运行：
+先分别安装上述八个必需包，再制定计划。随后创建 `INSTALL_AGENT.md` 中记载的封闭式 `request.json`，并运行：
 
 ```text
 node scripts/install.mjs plan --request <absolute-request.json> --config-root <absolute-config-root>
@@ -77,6 +79,28 @@ node scripts/install.mjs apply --plan <absolute-plan.json> --sha256 <approved-pl
 `defaultEnabled` 仅影响本 Orchestrator Mode 扩展，不会启用或禁用任何其他 Pi 扩展。当该文件或属性不存在时，全局默认值为 `false`。无效的 JSON 或非布尔值会产生警告，并同样回退为 `false`。编辑该文件后，运行 `/reload` 或重启 Pi，让扩展重新加载配置。
 
 生效状态的优先级为：当前会话分支中最近一次显式状态，其次 `defaultEnabled`，最后 `false`。因此，当 Pi 打开新会话或切换到未记录模式状态的会话时，`defaultEnabled: true` 会启用该模式；而曾执行过 `/orchestrator on` 或 `/orchestrator off` 的会话分支则保留其显式状态。
+
+## Goal 集成
+
+`@juicesharp/rpiv-todo` 是固定依赖，安装后所有模式都会获得其原生 `todo` 工具、`/todos` UI 与默认 guidance。
+
+Goal 始终由用户显式启动。你必须显式运行 `pi-goal` 原生命令，例如：
+
+```text
+/goal <objective>
+/goal --tokens 100k <objective>
+```
+
+Orchestrator 永远不会自动启动 Goal；本项目不提供 UltraGoal，也没有自动 Goal 转换。
+
+- 默认模式下，`/goal` 只遵循 `pi-goal` 原生工作流，不应用 Orchestrator 的 Wave 纪律。
+- Orchestrator Mode 下，`/goal` 保持 `pi-goal` 原生语义，并额外获得当前 Wave 检查点、后台 subagent 等待协调与既有风险路由。
+
+`rpiv-todo` 只维护当前 Wave/阶段检查点，不实时跟踪每个 subagent 的状态；subagent 实时状态仍以 Pi 的 Agent 工具为准。Orchestrator policy 是提示词层面的行为约束，不是替代 `pi-goal` 或 `rpiv-todo` 运行时校验的强制状态机。
+
+`pi-goal` 的原生 token budget 只统计主会话分支中的 assistant 用量，不包含 Orchestrator 派出的独立 subagent 会话。本项目不聚合这些用量，`/goal --tokens` 也不是涵盖 specialist 消耗的总上限。lane 数量或 `max_turns` 不是 token 预算的替代品。
+
+`@juicesharp/rpiv-i18n` 是 `rpiv-todo` 的 optional peer；未安装时 UI 回退为英文，todo 功能不受影响。本项目从不写入 `rpiv-todo` guidance 配置；上游默认行为与自行配置权保留给用户。
 
 ## 与 OpenCode 上 OMO-slim 的差异
 
@@ -114,6 +138,8 @@ INSTALL_AGENT.md                Pi Agent 的安装流程
 | `pi-lens` | 3.8.74 | <https://github.com/apmantza/pi-lens> |
 | `@firstpick/pi-extension-safety-guard` | 0.2.7 | <https://github.com/Firstp1ck/pi-coding-agent-forge> |
 | `@narumitw/pi-chrome-devtools` | 0.52.0 | <https://github.com/narumiruna/pi-extensions/tree/main/packages/pi-chrome-devtools> |
+| `@narumitw/pi-goal` | 0.51.0 | <https://github.com/narumiruna/pi-extensions> |
+| `@juicesharp/rpiv-todo` | 2.6.0 | <https://github.com/juicesharp/rpiv-mono> |
 
 这些依赖仍受各自上游许可证的约束。权威的许可证与声明以用户实际安装的版本所附带的为准。
 
