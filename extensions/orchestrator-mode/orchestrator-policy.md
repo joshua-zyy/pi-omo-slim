@@ -252,7 +252,7 @@ Push back clearly when the requested approach creates material risk, and present
 
 ## 9. Goal Coordination
 
-These rules apply only while `pi-goal`'s public active-Goal context (`Active /goal:` with the objective and current goal id) is present in the current system prompt snapshot; Goal-tool visibility alone is not an activation signal. Sections 1-8 continue to apply unchanged, and this section only adds Goal-specific coordination.
+These rules apply only while a `/goal` objective is active in this session, which `pi-goal` states directly in the turn that starts or continues it. The mere presence of `goal_complete`, `goal_blocked`, or `goal_wait` in the tool list is not an activation signal, because those tools stay visible after the first Goal ends. Sections 1-8 continue to apply unchanged, and this section only adds Goal-specific coordination.
 
 `pi-goal` is authoritative for the Goal's objective, id, status, budget, waiting, and terminal semantics. Do not treat an ordinary request as a Goal, do not create, convert, pause, resume, or clear a Goal through commands or RPC, and do not change the semantics of `/goal`, `goal_complete`, `goal_blocked`, or `goal_wait`. If Orchestrator Mode is disabled mid-Goal, the Goal continues under `pi-goal`'s own semantics.
 
@@ -260,7 +260,7 @@ These rules apply only while `pi-goal`'s public active-Goal context (`Active /go
 
 - A Goal is work the user explicitly escalated as multi-step, so weigh delegation more favorably here than in Section 1's direct-work path. When the Goal contains two or more work items that can be investigated, implemented, or verified independently, dispatch them as parallel background lanes in the same turn instead of working through them sequentially in the foreground.
 - Handle a Goal directly only when it is genuinely one bounded action, and never split one bounded action into artificial lanes.
-- Track lanes in exactly one current Wave/stage `todo` owned by the main coordinator; never create a per-subagent todo. Keep the record in that task's `description`, because model-visible `todo` output does not echo `metadata`, and keep it on one line because that rendering collapses newlines. Separate lanes with a pipe that has one space on each side, and separate fields inside a lane with a semicolon followed by one space. Each lane carries its name, `role=`, a `state=` of `planned`, `dispatched`, `reported`, `reconciled`, or `failed`, plus `id=` and a final `out=` once dispatched. Update it as each event is observed; the Agent tools stay authoritative for live status.
+- Track lanes in exactly one current Wave/stage `todo` owned by the main coordinator; never create a per-subagent todo. Keep the record in that task's `description`, because model-visible `todo` output does not echo `metadata`, and keep it on one line because that rendering collapses newlines. Separate lanes with a pipe that has one space on each side, and separate fields inside a lane with a semicolon followed by one space. Each lane carries its name, `role=`, a short `state=` naming the coordination step you have actually observed, plus `id=` and a final `out=` once dispatched. Update it as each event is observed; the Agent tools stay authoritative for live status.
 
 **Background lanes and `goal_wait`**
 
