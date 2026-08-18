@@ -58,7 +58,9 @@ const SUPPORTED_THINKING_LEVELS = [...THINKING].filter(
   (level) => level !== "inherit",
 );
 const ACTIONS = new Set(["install", "keep", "replace"]);
-const MODEL_ID_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.:@+~/-]+$/;
+// A model identifier is either a bare id (pi-subagents frontmatter accepts
+// fuzzy names) or a provider/model pair; both forms come from pi --list-models.
+const MODEL_ID_RE = /^[A-Za-z0-9_.:@+~/-]+$/;
 const PI_MINIMUM_VERSION = "0.80.6";
 const PI_SUBAGENTS_IDENTIFIER = "npm:@tintinweb/pi-subagents";
 const PI_SUBAGENTS_MINIMUM_VERSION = "0.15.0";
@@ -285,6 +287,9 @@ function runPi(executable, args, configRoot) {
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],
       windowsVerbatimArguments,
+      // Large model catalogs must not trip the 1 MiB default cap; the error
+      // path surfaces the truncated-output message to the caller either way.
+      maxBuffer: 64 * 1024 * 1024,
       env: { ...process.env, PI_CODING_AGENT_DIR: configRoot },
     });
   } catch (error) {
@@ -448,30 +453,29 @@ function inventoryPi(configRoot) {
     dependencyVersions[dependency] = dependencyVersion;
   }
   const modelsOutput = runPi(executable, ["--list-models"], configRoot);
-  const models = [
-    ...new Set(
-      modelsOutput
-        .split(/\r?\n/)
-        .map((line) => {
-          const columns = line.trim().split(/\s+/);
-          if (columns.length === 1 && MODEL_ID_RE.test(columns[0]))
-            return columns[0];
-          if (columns.length >= 2 && columns[0] !== "provider") {
-            const combined = `${columns[0]}/${columns[1]}`;
-            if (MODEL_ID_RE.test(combined)) return combined;
-          }
-          return null;
-        })
-        .filter(Boolean),
-    ),
-  ];
+  const models = new Set();
+  for (const line of modelsOutput.split(/\r?\n/)) {
+    const columns = line.trim().split(/\s+/);
+    if (columns.length === 1) {
+      if (columns[0] && columns[0] !== "provider" && MODEL_ID_RE.test(columns[0]))
+        models.add(columns[0]);
+      continue;
+    }
+    if (columns.length >= 2 && columns[0] !== "provider") {
+      const combined = `${columns[0]}/${columns[1]}`;
+      if (MODEL_ID_RE.test(combined)) models.add(combined);
+      // Bare model ids are also pinnable (fuzzy frontmatter), so collect the
+      // model column on its own as well.
+      if (MODEL_ID_RE.test(columns[1])) models.add(columns[1]);
+    }
+  }
   return {
     executable,
     version: versionText,
     minimum_version: PI_MINIMUM_VERSION,
     dependencies: installed,
     dependency_versions: dependencyVersions,
-    models,
+    models: [...models],
   };
 }
 
@@ -1109,11 +1113,19 @@ function applyMain(argv) {
     if (existsSync(target.destination))
       beforeHashes.set(target.id, sha256(target.destination));
   const unrelatedAgents = snapshotUnrelatedAgents(configRoot);
+  // Fresh installs merge over the repository template instead of an empty
+  // object, so future example keys are preserved rather than silently dropped.
   const orchestratorBefore = readJsonObject(
     join(configRoot, "orchestrator-mode.json"),
     "orchestrator-mode.json",
-    {},
+    null,
   );
+  const orchestratorBase =
+    orchestratorBefore ??
+    jsonFromBuffer(
+      verifiedSources.get("orchestrator-mode.json"),
+      "orchestrator template",
+    );
   const routingBefore = readJsonObject(
     join(configRoot, "subagents.json"),
     "subagents.json",
@@ -1309,7 +1321,7 @@ function applyMain(argv) {
       orchestratorTarget,
       Buffer.from(
         canonical({
-          ...orchestratorBefore,
+          ...orchestratorBase,
           defaultEnabled: plan.request.orchestratorDefaultEnabled,
         }),
       ),
@@ -1385,7 +1397,7 @@ function applyMain(argv) {
     if (
       canonical(actualOrchestrator) !==
       canonical({
-        ...orchestratorBefore,
+        ...orchestratorBase,
         defaultEnabled: plan.request.orchestratorDefaultEnabled,
       })
     )

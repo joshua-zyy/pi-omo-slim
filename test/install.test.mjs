@@ -50,7 +50,7 @@ writeFileSync(
     "const args = process.argv.slice(2);",
     'if (args.includes("--version")) { process.stdout.write((process.env.FAKE_PI_VERSION || "pi 0.83.0") + "\\n"); process.exit(0); }',
     'if (args.includes("list")) { process.stdout.write(process.env.FAKE_PI_PACKAGES || ""); process.exit(0); }',
-    'if (args.includes("--list-models")) { process.stdout.write("gpt-5\\n"); process.exit(0); }',
+    'if (args.includes("--list-models")) { process.stdout.write(process.env.FAKE_PI_MODELS || "gpt-5\\n"); process.exit(0); }',
     'process.stderr.write("unexpected fake pi args: " + args.join(" ") + "\\n");',
     "process.exit(2);",
     "",
@@ -181,6 +181,7 @@ function runPlan(packages, configRoot, options = {}) {
         PI_EXECUTABLE: fakePi,
         FAKE_PI_PACKAGES: `${listLines.join("\n")}\n`,
         FAKE_PI_VERSION: options.piVersion || "pi 0.83.0",
+        FAKE_PI_MODELS: options.models,
       },
     },
   );
@@ -1021,11 +1022,7 @@ const caseInsensitive =
 const caseVRoot = join(fixtureRoot, "caseV-case-variant");
 mkdirSync(join(caseVRoot, "agents"), { recursive: true });
 const variantContent = "# user explore agent\n";
-writeFileSync(
-  join(caseVRoot, "agents", "explore.md"),
-  variantContent,
-  "utf8",
-);
+writeFileSync(join(caseVRoot, "agents", "explore.md"), variantContent, "utf8");
 const variantRequestPath = join(fixtureRoot, "request-variant.json");
 writeFileSync(
   variantRequestPath,
@@ -1094,6 +1091,59 @@ if (caseInsensitive) {
     `stderr must report the case conflict:\n${result.stderr}`,
   );
 }
+
+// (M) Model inventory parsing: bare model ids (fuzzy frontmatter) and
+// provider/model pairs from a table-style --list-models output are both
+// pinnable.
+const caseMRoot = join(fixtureRoot, "caseM-model-pinning");
+const modelsRequestPath = join(fixtureRoot, "request-models.json");
+writeFileSync(
+  modelsRequestPath,
+  `${JSON.stringify(
+    {
+      routing: "strict",
+      orchestratorDefaultEnabled: false,
+      agents: Object.fromEntries(
+        ROLES.map((role) => [
+          role,
+          {
+            action: "install",
+            model:
+              role === "Explore"
+                ? "gpt-5"
+                : role === "Oracle"
+                  ? "fake-prov/gpt-5"
+                  : "inherit",
+            thinking: "inherit",
+          },
+        ]),
+      ),
+    },
+    null,
+    2,
+  )}\n`,
+  "utf8",
+);
+result = runPlan(FIXED_DEPENDENCIES, caseMRoot, {
+  piVersion: "0.84.2",
+  requestPath: modelsRequestPath,
+  models: "provider model context\nfake-prov gpt-5 1M\n",
+});
+assert.equal(
+  result.status,
+  0,
+  `bare and paired model pins must both resolve:\n${result.stderr}`,
+);
+const modelsPlanPath = result.stdout.trim().split(/\r?\n/)[0];
+const modelsPlan = JSON.parse(readFileSync(modelsPlanPath, "utf8"));
+assert.ok(
+  modelsPlan.pi.models.includes("gpt-5"),
+  "plan must record the bare model id",
+);
+assert.ok(
+  modelsPlan.pi.models.includes("fake-prov/gpt-5"),
+  "plan must record the provider/model pair",
+);
 
 // --- Documentation surface assertions (Task 3) ----------------------------
 // Static checks that the installation contract and both READMEs stay aligned

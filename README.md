@@ -76,7 +76,7 @@ The optional global configuration file is `<config-root>/orchestrator-mode.json`
 }
 ```
 
-`defaultEnabled` affects only this Orchestrator Mode extension; it does not enable or disable any other Pi extension. When the file or property is absent, the global default is `false`. Invalid JSON or a non-boolean value produces a warning and also falls back to `false`. After editing the file, run `/reload` or restart Pi so the extension reloads the configuration.
+`defaultEnabled` affects only this Orchestrator Mode extension; it does not enable or disable any other Pi extension. When the file or property is absent, the global default is `false`. Invalid JSON or a non-boolean value produces a warning and also falls back to `false`. The extension also reads `extensions/orchestrator-mode/orchestrator-policy.md` once at load. After editing either file, run `/reload` or restart Pi so the extension reloads the configuration.
 
 The effective state priority is: the latest explicit state in the current session branch, then `defaultEnabled`, then `false`. Consequently, `defaultEnabled: true` enables the mode when Pi opens a new session or switches to a session with no recorded mode state. A session branch that previously ran `/orchestrator on` or `/orchestrator off` retains that explicit state.
 

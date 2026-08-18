@@ -76,7 +76,7 @@ node scripts/install.mjs apply --plan <absolute-plan.json> --sha256 <approved-pl
 }
 ```
 
-`defaultEnabled` 仅影响本 Orchestrator Mode 扩展，不会启用或禁用任何其他 Pi 扩展。当该文件或属性不存在时，全局默认值为 `false`。无效的 JSON 或非布尔值会产生警告，并同样回退为 `false`。编辑该文件后，运行 `/reload` 或重启 Pi，让扩展重新加载配置。
+`defaultEnabled` 仅影响本 Orchestrator Mode 扩展，不会启用或禁用任何其他 Pi 扩展。当该文件或属性不存在时，全局默认值为 `false`。无效的 JSON 或非布尔值会产生警告，并同样回退为 `false`。扩展还会在加载时读取一次 `extensions/orchestrator-mode/orchestrator-policy.md`。编辑上述任一文件后，运行 `/reload` 或重启 Pi，让扩展重新加载配置。
 
 生效状态的优先级为：当前会话分支中最近一次显式状态，其次 `defaultEnabled`，最后 `false`。因此，当 Pi 打开新会话或切换到未记录模式状态的会话时，`defaultEnabled: true` 会启用该模式；而曾执行过 `/orchestrator on` 或 `/orchestrator off` 的会话分支则保留其显式状态。
 
