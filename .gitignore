@@ -1,6 +1,5 @@
 node_modules/
 *.tsbuildinfo
-.local-tests/
 .worktrees/
 /docs/superpowers/
 /docs/plans

@@ -101,7 +101,8 @@ function parseVersion(text) {
 
 function compareVersions(left, right) {
   for (let index = 0; index < 3; index += 1) {
-    if (left[index] !== right[index]) return left[index] < right[index] ? -1 : 1;
+    if (left[index] !== right[index])
+      return left[index] < right[index] ? -1 : 1;
   }
   return 0;
 }
@@ -370,7 +371,10 @@ function acquireInstallLock(lockPath) {
       stale = true;
     if (typeof value.created_at === "string") {
       const created = Date.parse(value.created_at);
-      if (Number.isFinite(created) && Date.now() - created > INSTALL_LOCK_STALE_MS)
+      if (
+        Number.isFinite(created) &&
+        Date.now() - created > INSTALL_LOCK_STALE_MS
+      )
         stale = true;
     }
   } catch {
@@ -517,26 +521,7 @@ function planMain(argv) {
     fail("Repository root must be a directory");
   const realRepositoryRoot = realpathSync(repositoryRoot);
   const request = readRequest(requestPath);
-  const sources = Object.fromEntries([
-    ...AGENT_IDS.map((id) => [id, join(repositoryRoot, id)]),
-    [
-      "extensions/orchestrator-mode/index.ts",
-      join(repositoryRoot, "extensions/orchestrator-mode/index.ts"),
-    ],
-    [
-      "extensions/orchestrator-mode/orchestrator-policy.md",
-      join(
-        repositoryRoot,
-        "extensions/orchestrator-mode/orchestrator-policy.md",
-      ),
-    ],
-    [
-      "orchestrator-mode.json",
-      join(repositoryRoot, "config/orchestrator-mode.json.example"),
-    ],
-    ["subagents.json", join(repositoryRoot, "config/subagents.json")],
-    ["settings.json", null],
-  ]);
+  const sources = expectedSourceMap(repositoryRoot);
   for (const id of TARGET_IDS)
     if (sources[id]) {
       containedReal(realRepositoryRoot, sources[id], "template");
@@ -598,7 +583,14 @@ function planMain(argv) {
     if (!lstatSync(agentsDir).isDirectory()) fail("agents must be a directory");
     for (const name of readdirSync(agentsDir)) {
       const id = `agents/${name}`;
-      if (AGENT_IDS.includes(id)) continue;
+      const relation = agentNameRelation(agentsDir, name);
+      if (relation === "exact" || relation === "same-file-variant") continue;
+      if (relation === "independent-variant")
+        fail(
+          `Case-variant Agent ${id} conflicts with a managed Agent target: ` +
+            `on case-sensitive filesystems both files would register as ` +
+            `case-ambiguous agent types. Rename or remove it and generate a new plan.`,
+        );
       const path = join(agentsDir, name);
       ensureNoSymlink(path, `custom Agent ${id}`, false);
       if (lstatSync(path).isFile())
@@ -952,6 +944,23 @@ function transformAgent(sourceBytes, choice, role) {
   return Buffer.from(transformed, "utf8");
 }
 
+// Classifies an agents-directory entry against the six managed Agent targets:
+// "exact" (a managed target), "same-file-variant" (a case-variant that the
+// filesystem resolves to the exact target file, i.e. a case-insensitive
+// filesystem), "independent-variant" (a separate file on a case-sensitive
+// filesystem, which would register as a case-ambiguous agent type next to its
+// managed target), or null (unrelated).
+function agentNameRelation(agentsDir, name) {
+  const id = `agents/${name}`;
+  if (AGENT_IDS.includes(id)) return "exact";
+  const variant = AGENT_IDS.find(
+    (agentId) => agentId.toLowerCase() === id.toLowerCase(),
+  );
+  if (!variant) return null;
+  const exactPath = join(agentsDir, variant.slice("agents/".length));
+  return existsSync(exactPath) ? "same-file-variant" : "independent-variant";
+}
+
 function snapshotUnrelatedAgents(configRoot) {
   const result = new Map();
   const agentsDir = join(configRoot, "agents");
@@ -959,7 +968,13 @@ function snapshotUnrelatedAgents(configRoot) {
   ensureNoSymlink(agentsDir, "agents directory", false);
   for (const name of readdirSync(agentsDir)) {
     const id = `agents/${name}`;
-    if (AGENT_IDS.includes(id)) continue;
+    const relation = agentNameRelation(agentsDir, name);
+    if (relation === "exact" || relation === "same-file-variant") continue;
+    if (relation === "independent-variant")
+      fail(
+        `Case-variant Agent ${id} appeared after plan approval: ` +
+          `it would register as a case-ambiguous agent type next to its managed target.`,
+      );
     const pathname = join(agentsDir, name);
     ensureNoSymlink(pathname, `unrelated Agent ${id}`, false);
     if (lstatSync(pathname).isFile()) result.set(id, sha256(pathname));
@@ -1014,22 +1029,34 @@ function applyMain(argv) {
     fail(`Invalid plan JSON: ${error.message}`);
   }
   const { configRoot, repositoryRoot, sources } = validatePlan(plan, planPath);
-  // Re-check the Pi floor at apply time too: the environment may have drifted
-  // between plan approval and execution, and agent_settled (pi-goal) must exist.
-  const currentVersionOutput = runPi(
-    resolvePiExecutable(),
-    ["--version"],
-    configRoot,
-  ).trim();
-  const currentVersion = parseVersion(currentVersionOutput);
-  if (
-    !currentVersion ||
-    compareVersions(currentVersion, parseVersion(PI_MINIMUM_VERSION)) < 0
-  )
+  // Re-verify the environment at apply time: it may have drifted between plan
+  // approval and execution. inventoryPi re-checks the Pi floor and the
+  // dependency minimums fail-closed; the checks below pin the execution
+  // environment to what the approved plan recorded.
+  const applyInventory = inventoryPi(configRoot);
+  if (applyInventory.version !== plan.pi.version)
     fail(
-      `Current Pi ${currentVersionOutput} is below the required minimum ` +
-        `${PI_MINIMUM_VERSION}; apply stops fail-closed.`,
+      `Pi version changed since plan approval: plan ${plan.pi.version}, ` +
+        `current ${applyInventory.version}; generate a new plan.`,
     );
+  for (const [identifier, plannedVersion] of Object.entries(
+    plan.pi.dependency_versions,
+  )) {
+    const currentVersion = applyInventory.dependency_versions[identifier];
+    if (currentVersion !== plannedVersion)
+      fail(
+        `${identifier} version changed since plan approval: plan ` +
+          `${plannedVersion}, current ${currentVersion}; generate a new plan.`,
+      );
+  }
+  for (const role of ROLES) {
+    const model = plan.request.agents[role].model;
+    if (model !== "inherit" && !applyInventory.models.includes(model))
+      fail(
+        `Pinned model ${model} for ${role} is no longer available; ` +
+          `generate a new plan.`,
+      );
+  }
   const installLockPath = join(configRoot, "install-records", ".install.lock");
   acquireInstallLock(installLockPath);
   const auditDir = dirname(planPath);
@@ -1163,7 +1190,10 @@ function applyMain(argv) {
       const existedNow = existsSync(target.destination);
       if (existedNow !== existedAtBackup.get(target.id))
         fail(`Target changed after backup: ${target.id}`);
-      if (existedNow && sha256(target.destination) !== hashAtBackup.get(target.id))
+      if (
+        existedNow &&
+        sha256(target.destination) !== hashAtBackup.get(target.id)
+      )
         fail(`Target content changed after backup: ${target.id}`);
       renameSync(tempPath, target.destination);
       temporaryFiles.delete(tempPath);
