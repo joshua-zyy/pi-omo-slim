@@ -1,0 +1,15 @@
+{
+  "name": "pi-omo-slim",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --test test/install.test.mjs"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.83.0",
+    "@types/node": "24.12.4",
+    "typescript": "5.9.3"
+  }
+}
