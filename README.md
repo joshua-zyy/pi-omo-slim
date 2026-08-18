@@ -19,9 +19,9 @@ This project is a configuration bundle. It does not fork Pi, `pi-subagents`, or 
 
 ## Requirements
 
-- Pi; requires **>= 0.80.6** because `@narumitw/pi-goal` depends on Pi's `agent_settled` lifecycle; this release was integration-accepted with **0.84.2** (the repository's `@earendil-works/pi-coding-agent` dev dependency is not changed);
+- Pi; requires **>= 0.80.6** because `@narumitw/pi-goal` depends on Pi's `agent_settled` lifecycle; the installer enforces this minimum at `plan` time and rejects an older Pi fail-closed. This release was integration-accepted with **0.84.2** (the repository's `@earendil-works/pi-coding-agent` dev dependency is not changed);
 - the following Pi packages:
-  - `@tintinweb/pi-subagents`
+  - `@tintinweb/pi-subagents` — **>= 0.15.0**: strict routing's `fallbackSubagent: "none"` only exists from that release, and the installer enforces this minimum at `plan` time
   - `@ff-labs/pi-fff`
   - `pi-web-access`
   - `pi-lens`
@@ -46,7 +46,7 @@ Repository cloning and Pi configuration installation are two separate approval c
 
 ## Deterministic installation outline
 
-Install the eight required packages separately before planning. Then create the closed `request.json` documented in `INSTALL_AGENT.md` and run:
+Install the eight required packages separately before planning; `plan` enforces the Pi >= 0.80.6 and `@tintinweb/pi-subagents` >= 0.15.0 minimums. Then create the closed `request.json` documented in `INSTALL_AGENT.md` and run:
 
 ```text
 node scripts/install.mjs plan --request <absolute-request.json> --config-root <absolute-config-root>

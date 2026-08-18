@@ -59,9 +59,24 @@ const SUPPORTED_THINKING_LEVELS = [...THINKING].filter(
 );
 const ACTIONS = new Set(["install", "keep", "replace"]);
 const MODEL_ID_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.:@+~/-]+$/;
+const PI_MINIMUM_VERSION = "0.80.6";
+const PI_SUBAGENTS_IDENTIFIER = "npm:@tintinweb/pi-subagents";
+const PI_SUBAGENTS_MINIMUM_VERSION = "0.15.0";
+const PLAN_SCHEMA_VERSION = 2;
+// The first `major.minor.patch` token in the output: real `pi --version`
+// prints a bare version and test doubles print a `pi x.y.z` prefix, so the
+// leading `(?:^|\s)` tolerates both. Comparison is numeric, never string
+// ordering (0.9.0 must sort below 0.80.6).
+const VERSION_TOKEN_RE =
+  /(?:^|\s)(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?(?=\s|$)/;
+// One `pi list` package line: an npm identifier, optionally suffixed with
+// "(filtered)". git: entries never match and are therefore ignored.
 const PACKAGE_INVENTORY_RE =
-  /(?:^|\s)(npm:(?:@[A-Za-z0-9_.-]+\/)?[A-Za-z0-9_.-]+)(?=\s|$)/g;
+  /^(npm:(?:@[A-Za-z0-9_.-]+\/)?[A-Za-z0-9_.-]+)(?:\s+\(filtered\))?\s*$/;
 const CMD_UNSAFE_RE = /["&|<>^%!\r\n]/;
+// An apply lock older than this is reclaimed even when its recorded PID looks
+// alive; a normal install never runs anywhere near this long.
+const INSTALL_LOCK_STALE_MS = 60 * 60 * 1000;
 
 function fail(message) {
   throw new Error(message);
@@ -75,6 +90,20 @@ function assertObject(value, label) {
 function assertKeys(value, allowed, label) {
   for (const key of Object.keys(value))
     if (!allowed.has(key)) fail(`${label} has unknown field: ${key}`);
+}
+
+function parseVersion(text) {
+  if (typeof text !== "string") return null;
+  const match = text.match(VERSION_TOKEN_RE);
+  if (!match) return null;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+function compareVersions(left, right) {
+  for (let index = 0; index < 3; index += 1) {
+    if (left[index] !== right[index]) return left[index] < right[index] ? -1 : 1;
+  }
+  return 0;
 }
 
 function parseOptions(argv, allowed) {
@@ -265,23 +294,156 @@ function runPi(executable, args, configRoot) {
   return output;
 }
 
-function inventoryPi(configRoot) {
-  const executable =
+function inventoryListedPackages(listOutput) {
+  // `pi list` prints one package identifier line followed by a more-indented
+  // installation path line; "(filtered)" may suffix the identifier and git:
+  // entries carry no version the installer can enforce, so they are ignored.
+  const packages = new Map();
+  const lines = listOutput.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    const identifier = lines[index].trim().match(PACKAGE_INVENTORY_RE)?.[1];
+    if (!identifier) continue;
+    const pathLine = lines[index + 1];
+    let pathname = null;
+    if (pathLine && /^\s+\S/.test(pathLine) && isAbsolute(pathLine.trim())) {
+      pathname = resolve(pathLine.trim());
+      index += 1;
+    }
+    packages.set(identifier, pathname);
+  }
+  return packages;
+}
+
+function installedPackageVersion(pathname) {
+  if (!pathname) return null;
+  try {
+    const value = JSON.parse(
+      readFileSync(join(pathname, "package.json"), "utf8"),
+    );
+    return typeof value.version === "string" && value.version.trim()
+      ? value.version.trim()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolvePiExecutable() {
+  return (
     process.env.PI_EXECUTABLE ||
-    (process.platform === "win32" ? "pi.cmd" : "pi");
-  const version = runPi(executable, ["--version"], configRoot).trim();
-  const listOutput = runPi(executable, ["list"], configRoot);
-  const modelsOutput = runPi(executable, ["--list-models"], configRoot);
-  const installedPackages = new Set(
-    [...listOutput.matchAll(PACKAGE_INVENTORY_RE)].map((match) => match[1]),
+    (process.platform === "win32" ? "pi.cmd" : "pi")
   );
+}
+
+function processIsAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+}
+
+// Exclusive config-root lock for the whole apply transaction. Two concurrent
+// applies must never interleave their preflight reads, writes, or rollbacks.
+// The lock is reclaimed when its recorded owner is gone or the file is stale;
+// explicit release is best-effort and crash-safe by that same reclamation.
+function acquireInstallLock(lockPath) {
+  const tryCreate = () => {
+    try {
+      writeFileSync(
+        lockPath,
+        canonical({ pid: process.pid, created_at: new Date().toISOString() }),
+        { flag: "wx" },
+      );
+      return true;
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      return false;
+    }
+  };
+  if (tryCreate()) return;
+  let stale = false;
+  try {
+    const value = JSON.parse(readFileSync(lockPath, "utf8"));
+    if (typeof value.pid === "number" && !processIsAlive(value.pid))
+      stale = true;
+    if (typeof value.created_at === "string") {
+      const created = Date.parse(value.created_at);
+      if (Number.isFinite(created) && Date.now() - created > INSTALL_LOCK_STALE_MS)
+        stale = true;
+    }
+  } catch {
+    stale = true;
+  }
+  if (stale) {
+    rmSync(lockPath, { force: true });
+    if (tryCreate()) return;
+  }
+  fail(
+    `Another installation appears to be in progress (lock file: ${lockPath}). ` +
+      `Wait for it to finish, or remove the lock file if it is stale.`,
+  );
+}
+
+function releaseInstallLock(lockPath) {
+  try {
+    rmSync(lockPath, { force: true });
+  } catch {
+    /* best-effort: a stale lock is reclaimed by the next acquire */
+  }
+}
+
+function inventoryPi(configRoot) {
+  const executable = resolvePiExecutable();
+  const versionOutput = runPi(executable, ["--version"], configRoot).trim();
+  const version = parseVersion(versionOutput);
+  if (!version)
+    fail(
+      `Cannot parse Pi version from \`pi --version\` output: ${JSON.stringify(versionOutput)}; planning stops fail-closed`,
+    );
+  const versionText = version.join(".");
+  if (compareVersions(version, parseVersion(PI_MINIMUM_VERSION)) < 0)
+    fail(
+      `Pi ${versionText} is below the required minimum ${PI_MINIMUM_VERSION}: ` +
+        `@narumitw/pi-goal depends on Pi's agent_settled lifecycle event, so ` +
+        `planning stops fail-closed. Update Pi and generate a new plan.`,
+    );
+  const listOutput = runPi(executable, ["list"], configRoot);
+  const listedPackages = inventoryListedPackages(listOutput);
   const installed = DEPENDENCIES.filter((dependency) =>
-    installedPackages.has(dependency),
+    listedPackages.has(dependency),
   );
   if (installed.length !== DEPENDENCIES.length)
     fail(
       `Missing Pi dependencies: ${DEPENDENCIES.filter((item) => !installed.includes(item)).join(", ")}`,
     );
+  const dependencyVersions = {};
+  for (const dependency of DEPENDENCIES) {
+    const dependencyVersion = installedPackageVersion(
+      listedPackages.get(dependency),
+    );
+    if (dependency === PI_SUBAGENTS_IDENTIFIER) {
+      const dependencyParts = parseVersion(dependencyVersion);
+      if (
+        !dependencyParts ||
+        compareVersions(
+          dependencyParts,
+          parseVersion(PI_SUBAGENTS_MINIMUM_VERSION),
+        ) < 0
+      )
+        fail(
+          `${dependency} ${dependencyVersion ?? "installed version unknown"} is below the required minimum ` +
+            `${PI_SUBAGENTS_MINIMUM_VERSION}: strict routing's ` +
+            `fallbackSubagent: "none" only exists from ` +
+            `${PI_SUBAGENTS_MINIMUM_VERSION}, so an older release would silently ` +
+            `fall back to the permissive general-purpose Agent. Planning stops ` +
+            `fail-closed; update the package and generate a new plan.`,
+        );
+    }
+    dependencyVersions[dependency] = dependencyVersion;
+  }
+  const modelsOutput = runPi(executable, ["--list-models"], configRoot);
   const models = [
     ...new Set(
       modelsOutput
@@ -299,7 +461,14 @@ function inventoryPi(configRoot) {
         .filter(Boolean),
     ),
   ];
-  return { executable, version, dependencies: installed, models };
+  return {
+    executable,
+    version: versionText,
+    minimum_version: PI_MINIMUM_VERSION,
+    dependencies: installed,
+    dependency_versions: dependencyVersions,
+    models,
+  };
 }
 
 function validateJsonObject(pathname, label) {
@@ -455,7 +624,7 @@ function planMain(argv) {
     }
   }
   const plan = {
-    schema_version: 1,
+    schema_version: PLAN_SCHEMA_VERSION,
     plan_id: planId,
     generated_at: new Date().toISOString(),
     status: "planned",
@@ -471,7 +640,9 @@ function planMain(argv) {
     pi: {
       executable: pi.executable,
       version: pi.version,
+      minimum_version: pi.minimum_version,
       dependencies: pi.dependencies,
+      dependency_versions: pi.dependency_versions,
       models: pi.models,
       accepted_thinking_levels: SUPPORTED_THINKING_LEVELS,
     },
@@ -554,7 +725,7 @@ function expectedSourceMap(repositoryRoot) {
 
 function validatePlan(plan, planPath) {
   assertObject(plan, "plan");
-  if (plan.schema_version !== 1 || plan.status !== "planned")
+  if (plan.schema_version !== PLAN_SCHEMA_VERSION || plan.status !== "planned")
     fail("Unsupported or non-planned install plan");
   if (
     typeof plan.plan_id !== "string" ||
@@ -593,6 +764,54 @@ function validatePlan(plan, planPath) {
   assertObject(plan.pi, "plan.pi");
   if (!Array.isArray(plan.pi.models) || !Array.isArray(plan.pi.dependencies))
     fail("Invalid Pi inventory in plan");
+  if (plan.pi.minimum_version !== PI_MINIMUM_VERSION)
+    fail("Invalid Pi minimum version in plan");
+  if (!parseVersion(plan.pi.version))
+    fail(`Invalid Pi version in plan: ${plan.pi.version}`);
+  if (
+    compareVersions(
+      parseVersion(plan.pi.version),
+      parseVersion(PI_MINIMUM_VERSION),
+    ) < 0
+  )
+    fail(
+      `Pi ${plan.pi.version} in plan is below the required minimum ${PI_MINIMUM_VERSION}`,
+    );
+  if (
+    plan.pi.dependencies.length !== DEPENDENCIES.length ||
+    DEPENDENCIES.some(
+      (identifier, index) => plan.pi.dependencies[index] !== identifier,
+    )
+  )
+    fail("Invalid Pi dependency list in plan");
+  assertObject(plan.pi.dependency_versions, "plan.pi.dependency_versions");
+  const dependencyVersionKeys = Object.keys(plan.pi.dependency_versions);
+  if (
+    dependencyVersionKeys.length !== DEPENDENCIES.length ||
+    DEPENDENCIES.some(
+      (identifier) => !(identifier in plan.pi.dependency_versions),
+    )
+  )
+    fail("Invalid dependency versions in plan");
+  for (const [identifier, dependencyVersion] of Object.entries(
+    plan.pi.dependency_versions,
+  )) {
+    if (dependencyVersion !== null && typeof dependencyVersion !== "string")
+      fail(`Invalid dependency version for ${identifier}`);
+    if (identifier === PI_SUBAGENTS_IDENTIFIER) {
+      const dependencyParts = parseVersion(dependencyVersion);
+      if (
+        !dependencyParts ||
+        compareVersions(
+          dependencyParts,
+          parseVersion(PI_SUBAGENTS_MINIMUM_VERSION),
+        ) < 0
+      )
+        fail(
+          `${identifier} version ${dependencyVersion} in plan is below the required minimum ${PI_SUBAGENTS_MINIMUM_VERSION}`,
+        );
+    }
+  }
   for (const role of ROLES) {
     const model = plan.request.agents[role].model;
     if (
@@ -795,6 +1014,24 @@ function applyMain(argv) {
     fail(`Invalid plan JSON: ${error.message}`);
   }
   const { configRoot, repositoryRoot, sources } = validatePlan(plan, planPath);
+  // Re-check the Pi floor at apply time too: the environment may have drifted
+  // between plan approval and execution, and agent_settled (pi-goal) must exist.
+  const currentVersionOutput = runPi(
+    resolvePiExecutable(),
+    ["--version"],
+    configRoot,
+  ).trim();
+  const currentVersion = parseVersion(currentVersionOutput);
+  if (
+    !currentVersion ||
+    compareVersions(currentVersion, parseVersion(PI_MINIMUM_VERSION)) < 0
+  )
+    fail(
+      `Current Pi ${currentVersionOutput} is below the required minimum ` +
+        `${PI_MINIMUM_VERSION}; apply stops fail-closed.`,
+    );
+  const installLockPath = join(configRoot, "install-records", ".install.lock");
+  acquireInstallLock(installLockPath);
   const auditDir = dirname(planPath);
   const attemptPath = join(auditDir, "apply-started.json");
   const resultPath = join(auditDir, "result.json");
@@ -920,6 +1157,14 @@ function applyMain(argv) {
         `write ${target.id}`,
       );
       ensureNoSymlink(target.destination, `write ${target.id}`);
+      // Narrow the write window to the two calls between this re-check and the
+      // atomic rename: refuse to overwrite a destination that appeared or
+      // changed after the backup snapshot.
+      const existedNow = existsSync(target.destination);
+      if (existedNow !== existedAtBackup.get(target.id))
+        fail(`Target changed after backup: ${target.id}`);
+      if (existedNow && sha256(target.destination) !== hashAtBackup.get(target.id))
+        fail(`Target content changed after backup: ${target.id}`);
       renameSync(tempPath, target.destination);
       temporaryFiles.delete(tempPath);
     } catch (error) {
@@ -937,6 +1182,7 @@ function applyMain(argv) {
       path: target.destination,
       existed,
       backup,
+      installed_sha256: sha256Bytes(bytes),
     });
     transaction.operations.push({
       type: existed ? "replace" : "create",
@@ -1162,6 +1408,7 @@ function applyMain(argv) {
       manifest: manifestPath,
       operations: transaction.operations,
     });
+    releaseInstallLock(installLockPath);
     process.stdout.write(`${resultPath}\n`);
   } catch (error) {
     const compensations = [];
@@ -1186,6 +1433,16 @@ function applyMain(argv) {
             `restore ${file.path}`,
           );
           ensureNoSymlink(file.path, `restore ${file.path}`);
+          // Ownership check: only overwrite a destination that still holds the
+          // bytes this transaction wrote. A concurrent writer's changes are
+          // never clobbered by rollback; they surface as unresolved instead.
+          if (
+            existsSync(file.path) &&
+            sha256(file.path) !== file.installed_sha256
+          )
+            throw new Error(
+              `Target changed after install; refusing to overwrite with backup: ${file.path}`,
+            );
           copyFileSync(file.backup, file.path);
         } else if (existsSync(file.path)) {
           // Re-check containment and symlink state before deleting: never let
@@ -1197,6 +1454,13 @@ function applyMain(argv) {
             `delete ${file.path}`,
           );
           ensureNoSymlink(file.path, `delete ${file.path}`);
+          // Ownership check: only delete a file that still holds the bytes this
+          // transaction created; a concurrent replacement is left in place and
+          // reported as unresolved rather than silently removed.
+          if (sha256(file.path) !== file.installed_sha256)
+            throw new Error(
+              `Target changed after install; refusing to delete: ${file.path}`,
+            );
           rmSync(file.path, { force: true });
         }
         compensations.push({
@@ -1269,6 +1533,7 @@ function applyMain(argv) {
       error: error.message,
       unresolved_paths: unresolved,
     });
+    releaseInstallLock(installLockPath);
     fail(
       `Installation failed and ${status === "rolled_back" ? "was rolled back" : "rollback is incomplete"}: ${error.message}`,
     );

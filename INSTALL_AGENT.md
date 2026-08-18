@@ -7,7 +7,7 @@ This document is the operational contract for an Agent after this repository is 
 1. Resolve the repository root, Pi executable, and actual absolute Pi configuration root. If `PI_CODING_AGENT_DIR` is set, use it; otherwise confirm the platform's global Pi configuration directory with the user.
 2. Inspect before changing state. Do not overwrite or update an existing clone or Pi configuration without the approval required below.
 3. Use `scripts/install.mjs` as the only installation entry point. Do not create ad hoc Shell, JavaScript, Python, or other installation, backup, verification, or rollback programs.
-4. The installer never installs or removes packages. All eight dependencies must already be present:
+4. The installer never installs or removes packages. All eight dependencies must already be present, and the installer enforces minimum versions: Pi >= 0.80.6 (`@narumitw/pi-goal` needs Pi's `agent_settled` lifecycle) and `npm:@tintinweb/pi-subagents` >= 0.15.0 (strict routing's `fallbackSubagent: "none"` requires it):
 
    ```text
    npm:@tintinweb/pi-subagents
@@ -20,7 +20,7 @@ This document is the operational contract for an Agent after this repository is 
    npm:@juicesharp/rpiv-todo
    ```
 
-5. If a dependency is missing, stop. Show only the missing fixed `pi install npm:<package>` commands, obtain separate approval, run them, and then generate a new plan.
+5. If a dependency is missing or its installed version is below the enforced minimum, stop. Show only the missing fixed `pi install npm:<package>` commands, obtain separate approval, run them, and then generate a new plan.
 6. Never modify model credentials, providers, unrelated Agents, installed-package source code, or project templates.
 7. Never hand-edit `plan.json`. A new choice or environmental change requires a new plan.
 8. An approved plan SHA authorizes only the listed writes and the listed automatic rollback deletions. Any unrelated cleanup or later manual rollback requires separate approval.
@@ -79,7 +79,7 @@ Show the exact command and obtain approval to create the audit plan, then run:
 node scripts/install.mjs plan --request <absolute-request.json> --config-root <absolute-config-root>
 ```
 
-`plan` validates the closed request, repository templates, Pi dependencies/models, same-name conflict decisions, JSON objects, paths, and symbolic-link safety. Its only configuration-root write is:
+`plan` validates the closed request, repository templates, Pi version and dependency minimums, Pi dependencies/models, same-name conflict decisions, JSON objects, paths, and symbolic-link safety. Its only configuration-root write is:
 
 ```text
 <config-root>/install-records/<plan-id>/plan.json
@@ -91,7 +91,8 @@ If planning fails, stop. Do not repair configuration or improvise another comman
 
 Read the generated `plan.json` and present:
 
-- repository/configuration roots and Pi version;
+- repository/configuration roots, the Pi version, and the enforced Pi minimum (>= 0.80.6);
+- each dependency's installed version and the enforced `npm:@tintinweb/pi-subagents` >= 0.15.0 minimum;
 - every role's action, model, and thinking choice;
 - strict or compatibility routing behavior;
 - Orchestrator default;

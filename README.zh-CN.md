@@ -19,9 +19,9 @@
 
 ## 环境要求
 
-- Pi；要求 **>= 0.80.6**，因为 `@narumitw/pi-goal` 依赖 Pi 的 `agent_settled` 生命周期；本次发布以 **0.84.2** 完成集成验收（仓库的 `@earendil-works/pi-coding-agent` dev dependency 不因此修改）；
+- Pi；要求 **>= 0.80.6**，因为 `@narumitw/pi-goal` 依赖 Pi 的 `agent_settled` 生命周期；安装器会在 `plan` 阶段强制此下限，更低的 Pi 会被 fail-closed 拒绝。本次发布以 **0.84.2** 完成集成验收（仓库的 `@earendil-works/pi-coding-agent` dev dependency 不因此修改）；
 - 以下 Pi 包：
-  - `@tintinweb/pi-subagents`
+  - `@tintinweb/pi-subagents` — **>= 0.15.0**：strict 路由的 `fallbackSubagent: "none"` 从该版本起才存在，安装器会在 `plan` 阶段强制此下限
   - `@ff-labs/pi-fff`
   - `pi-web-access`
   - `pi-lens`
@@ -46,7 +46,7 @@ Agent 会询问仓库的存放位置，在获得确切克隆命令的批准后�
 
 ## 确定性安装概要
 
-先分别安装上述八个必需包，再制定计划。随后创建 `INSTALL_AGENT.md` 中记载的封闭式 `request.json`，并运行：
+先分别安装上述八个必需包，再制定计划；`plan` 会强制 Pi >= 0.80.6 与 `@tintinweb/pi-subagents` >= 0.15.0 的下限。随后创建 `INSTALL_AGENT.md` 中记载的封闭式 `request.json`，并运行：
 
 ```text
 node scripts/install.mjs plan --request <absolute-request.json> --config-root <absolute-config-root>
