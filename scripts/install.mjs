@@ -457,7 +457,11 @@ function inventoryPi(configRoot) {
   for (const line of modelsOutput.split(/\r?\n/)) {
     const columns = line.trim().split(/\s+/);
     if (columns.length === 1) {
-      if (columns[0] && columns[0] !== "provider" && MODEL_ID_RE.test(columns[0]))
+      if (
+        columns[0] &&
+        columns[0] !== "provider" &&
+        MODEL_ID_RE.test(columns[0])
+      )
         models.add(columns[0]);
       continue;
     }
