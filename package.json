@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --test test/install.test.mjs"
+    "test": "node --experimental-strip-types --test test/*.test.mjs"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.83.0",

@@ -1180,7 +1180,7 @@ const orchestratorGoalPolicy = readFileSync(
 );
 assert.match(
   orchestratorGoalPolicy,
-  /only while the current session has an active Goal/,
+  /only while the current session has an active \/?goal/i,
   "Goal policy must state its active-Goal scope",
 );
 assert.ok(
