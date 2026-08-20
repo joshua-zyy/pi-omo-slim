@@ -19,6 +19,15 @@ const GOAL_POLICY_PATH = join(
 	"orchestrator-goal-policy.md",
 );
 const CONFIG_PATH = join(getAgentDir(), "orchestrator-mode.json");
+const AGENTS_DIR = join(getAgentDir(), "agents");
+const ROLE_FILES = [
+	"Explore",
+	"librarian",
+	"oracle",
+	"designer",
+	"fixer",
+	"verifier",
+];
 
 type OrchestratorState = {
 	enabled: boolean;
@@ -26,6 +35,16 @@ type OrchestratorState = {
 
 type OrchestratorConfig = {
 	defaultEnabled?: boolean;
+};
+
+type ToolAudit = {
+	references: number;
+	unique: number;
+	/** Referenced tool name -> roles that declare it. */
+	missing: Map<string, string[]>;
+	/** Roles whose file or frontmatter could not be read. */
+	unchecked: string[];
+	compared: boolean;
 };
 
 function loadPolicy(path: string, label: string): { policy?: string; error?: string } {
@@ -43,6 +62,84 @@ function loadPolicy(path: string, label: string): { policy?: string; error?: str
 	}
 }
 
+/** Return the frontmatter body of an agent file, or undefined when absent. */
+function frontmatterBlock(source: string): string | undefined {
+	if (!source.startsWith("---")) return undefined;
+	const end = source.indexOf("\n---", 3);
+	return end === -1 ? undefined : source.slice(3, end);
+}
+
+/**
+ * Extract the bare tool names from an agent's `ext:<extension>/<tool>` selectors.
+ *
+ * Only the tool half is returned. The extension half is deliberately ignored:
+ * the failure this guards against is a tool that no longer exists under the
+ * declared name, and matching extension identity would mean reimplementing
+ * pi-subagents' canonical-name resolution.
+ */
+function extToolNames(block: string): string[] {
+	for (const line of block.split("\n")) {
+		if (!line.startsWith("tools:")) continue;
+		return line
+			.slice("tools:".length)
+			.split(",")
+			.map((entry) => entry.trim())
+			.filter((entry) => entry.startsWith("ext:"))
+			.map((entry) => entry.slice("ext:".length))
+			.filter((entry) => entry.includes("/"))
+			.map((entry) => entry.slice(entry.indexOf("/") + 1).trim())
+			.filter(Boolean);
+	}
+	return [];
+}
+
+/**
+ * Compare every installed agent's `ext:` tool selectors against the tools this
+ * session actually has.
+ *
+ * pi-subagents narrows a subagent's tools by intersecting the declared
+ * selectors with the registered tool names, so a renamed or removed upstream
+ * tool silently contributes nothing instead of failing. An empty `known` set is
+ * treated as "cannot compare" rather than "everything is missing", so a
+ * surprising tool registry can never produce a wall of false alarms.
+ */
+function auditAgentTools(known: Set<string>): ToolAudit {
+	const missing = new Map<string, string[]>();
+	const unchecked: string[] = [];
+	const seen = new Set<string>();
+	const compared = known.size > 0;
+	let references = 0;
+
+	for (const role of ROLE_FILES) {
+		let block: string | undefined;
+		try {
+			block = frontmatterBlock(readFileSync(join(AGENTS_DIR, `${role}.md`), "utf8"));
+		} catch {
+			block = undefined;
+		}
+		if (!block) {
+			unchecked.push(role);
+			continue;
+		}
+		for (const tool of extToolNames(block)) {
+			references += 1;
+			seen.add(tool);
+			if (!compared || known.has(tool)) continue;
+			const roles = missing.get(tool);
+			if (roles) roles.push(role);
+			else missing.set(tool, [role]);
+		}
+	}
+
+	return { references, unique: seen.size, missing, unchecked, compared };
+}
+
+function describeMissing(audit: ToolAudit): string {
+	return [...audit.missing]
+		.map(([tool, roles]) => `${tool} (${roles.join(", ")})`)
+		.join("; ");
+}
+
 function hasActiveGoal(ctx: ExtensionContext): boolean {
 	const branch = ctx.sessionManager.getBranch();
 	for (let index = branch.length - 1; index >= 0; index -= 1) {
@@ -54,7 +151,11 @@ function hasActiveGoal(ctx: ExtensionContext): boolean {
 	return false;
 }
 
-function loadConfig(): { defaultEnabled: boolean; error?: string } {
+function loadConfig(): {
+	defaultEnabled: boolean;
+	source: "file" | "absent" | "invalid";
+	error?: string;
+} {
 	try {
 		const config = JSON.parse(
 			readFileSync(CONFIG_PATH, "utf8"),
@@ -62,6 +163,7 @@ function loadConfig(): { defaultEnabled: boolean; error?: string } {
 		if (!config || typeof config !== "object" || Array.isArray(config)) {
 			return {
 				defaultEnabled: false,
+				source: "invalid",
 				error: `Expected a JSON object in ${CONFIG_PATH}`,
 			};
 		}
@@ -71,10 +173,11 @@ function loadConfig(): { defaultEnabled: boolean; error?: string } {
 		) {
 			return {
 				defaultEnabled: false,
+				source: "invalid",
 				error: `defaultEnabled must be a boolean in ${CONFIG_PATH}`,
 			};
 		}
-		return { defaultEnabled: config.defaultEnabled ?? false };
+		return { defaultEnabled: config.defaultEnabled ?? false, source: "file" };
 	} catch (error) {
 		if (
 			error &&
@@ -82,11 +185,12 @@ function loadConfig(): { defaultEnabled: boolean; error?: string } {
 			"code" in error &&
 			error.code === "ENOENT"
 		) {
-			return { defaultEnabled: false };
+			return { defaultEnabled: false, source: "absent" };
 		}
 		const message = error instanceof Error ? error.message : String(error);
 		return {
 			defaultEnabled: false,
+			source: "invalid",
 			error: `Unable to read orchestrator config at ${CONFIG_PATH}: ${message}`,
 		};
 	}
@@ -97,6 +201,9 @@ export default function orchestratorModeExtension(pi: ExtensionAPI) {
 	const loadedGoalPolicy = loadPolicy(GOAL_POLICY_PATH, "Orchestrator Goal policy");
 	const config = loadConfig();
 	let enabled = config.defaultEnabled;
+	let explicitState = false;
+
+	const audit = () => auditAgentTools(new Set(pi.getAllTools().map((t) => t.name)));
 
 	const updateStatus = (ctx: ExtensionContext) => {
 		if (!ctx.hasUI) return;
@@ -112,8 +219,56 @@ export default function orchestratorModeExtension(pi: ExtensionAPI) {
 		ctx.ui.notify(message, level);
 	};
 
+	const modeSource = (): string => {
+		// Not "from defaultEnabled" when the policy failed to load: the mode is off
+		// because it was forced off, and a diagnostic must not misattribute that.
+		if (!loaded.policy) return "forced off, core policy unavailable";
+		return explicitState ? "explicit in this session branch" : "from defaultEnabled";
+	};
+
+	const report = (): string[] => {
+		const lines = [
+			`mode: ${enabled ? "on" : "off"} (${modeSource()})`,
+			`core policy: ${
+				loaded.policy
+					? `loaded, ${loaded.policy.length} chars`
+					: `unavailable — ${loaded.error}`
+			}`,
+			`goal policy: ${
+				loadedGoalPolicy.policy
+					? `loaded, ${loadedGoalPolicy.policy.length} chars`
+					: `unavailable — ${loadedGoalPolicy.error}`
+			}`,
+			`defaultEnabled: ${config.defaultEnabled} (${
+				config.error ?? `orchestrator-mode.json ${config.source}`
+			})`,
+		];
+
+		const result = audit();
+		lines.push(
+			`agent files: ${ROLE_FILES.length - result.unchecked.length}/${
+				ROLE_FILES.length
+			} readable in ${AGENTS_DIR}${
+				result.unchecked.length ? ` — unchecked: ${result.unchecked.join(", ")}` : ""
+			}`,
+		);
+
+		if (!result.compared) {
+			lines.push("ext tool references: not compared, this session reports no tools");
+		} else {
+			lines.push(
+				`ext tool references: ${result.references} across ${result.unique} unique names — ${
+					result.missing.size ? `MISSING ${describeMissing(result)}` : "all present"
+				}`,
+			);
+		}
+
+		return lines;
+	};
+
 	const restoreState = (ctx: ExtensionContext) => {
 		enabled = config.defaultEnabled;
+		explicitState = false;
 
 		if (config.error)
 			notify(
@@ -125,7 +280,9 @@ export default function orchestratorModeExtension(pi: ExtensionAPI) {
 		for (const entry of ctx.sessionManager.getBranch()) {
 			if (entry.type !== "custom" || entry.customType !== STATE_ENTRY) continue;
 			const data = entry.data as Partial<OrchestratorState> | undefined;
-			if (typeof data?.enabled === "boolean") enabled = data.enabled;
+			if (typeof data?.enabled !== "boolean") continue;
+			enabled = data.enabled;
+			explicitState = true;
 		}
 
 		if (enabled && !loaded.policy) {
@@ -159,6 +316,7 @@ export default function orchestratorModeExtension(pi: ExtensionAPI) {
 		}
 
 		enabled = next;
+		explicitState = true;
 		pi.appendEntry(STATE_ENTRY, { enabled } satisfies OrchestratorState);
 		updateStatus(ctx);
 		notify(ctx, `Orchestrator mode ${enabled ? "enabled" : "disabled"}.`);
@@ -183,13 +341,31 @@ export default function orchestratorModeExtension(pi: ExtensionAPI) {
 					updateStatus(ctx);
 					notify(ctx, `Orchestrator mode is ${enabled ? "on" : "off"}.`);
 					return;
+				case "doctor":
+					notify(ctx, report().join("\n"));
+					return;
 				default:
-					notify(ctx, "Usage: /orchestrator [on|off|status]", "warning");
+					notify(ctx, "Usage: /orchestrator [on|off|status|doctor]", "warning");
 			}
 		},
 	});
 
-	pi.on("session_start", async (_event, ctx) => restoreState(ctx));
+	pi.on("session_start", async (_event, ctx) => {
+		restoreState(ctx);
+
+		// Only confirmed problems are surfaced here. Missing agent files are normal
+		// outside an installed configuration, so they stay silent until /orchestrator
+		// doctor asks for them.
+		const result = audit();
+		if (result.missing.size)
+			notify(
+				ctx,
+				`Agent tool selectors reference tools this session does not provide: ${describeMissing(
+					result,
+				)}. Those roles run without them. Run /orchestrator doctor for details.`,
+				"warning",
+			);
+	});
 	pi.on("session_tree", async (_event, ctx) => restoreState(ctx));
 
 	pi.on("before_agent_start", async (event, ctx) => {
