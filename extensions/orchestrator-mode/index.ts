@@ -222,6 +222,12 @@ export default function orchestratorModeExtension(pi: ExtensionAPI) {
 	const modeSource = (): string => {
 		// Not "from defaultEnabled" when the policy failed to load: the mode is off
 		// because it was forced off, and a diagnostic must not misattribute that.
+		//
+		// This branch is deliberately uncovered by tests. POLICY_PATH resolves next
+		// to this file, so forcing a load failure would mean mutating a repository
+		// file from a test run. Covering it properly means making the policy path
+		// injectable, which is only worth doing alongside tests for the fail-closed
+		// guards below that share the same blind spot.
 		if (!loaded.policy) return "forced off, core policy unavailable";
 		return explicitState ? "explicit in this session branch" : "from defaultEnabled";
 	};
