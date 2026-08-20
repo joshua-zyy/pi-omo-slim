@@ -30,6 +30,7 @@ const TARGET_IDS = [
   ...AGENT_IDS,
   "extensions/orchestrator-mode/index.ts",
   "extensions/orchestrator-mode/orchestrator-policy.md",
+  "extensions/orchestrator-mode/orchestrator-goal-policy.md",
   "orchestrator-mode.json",
   "subagents.json",
   "settings.json",
@@ -715,6 +716,13 @@ function expectedSourceMap(repositoryRoot) {
       ),
     ],
     [
+      "extensions/orchestrator-mode/orchestrator-goal-policy.md",
+      join(
+        repositoryRoot,
+        "extensions/orchestrator-mode/orchestrator-goal-policy.md",
+      ),
+    ],
+    [
       "orchestrator-mode.json",
       join(repositoryRoot, "config/orchestrator-mode.json.example"),
     ],
@@ -1314,6 +1322,7 @@ function applyMain(argv) {
     for (const id of [
       "extensions/orchestrator-mode/index.ts",
       "extensions/orchestrator-mode/orchestrator-policy.md",
+      "extensions/orchestrator-mode/orchestrator-goal-policy.md",
     ]) {
       const target = plan.targets.find((item) => item.id === id);
       if (target.may_modify) writeManaged(target, verifiedSources.get(id));
@@ -1385,6 +1394,7 @@ function applyMain(argv) {
     for (const id of [
       "extensions/orchestrator-mode/index.ts",
       "extensions/orchestrator-mode/orchestrator-policy.md",
+      "extensions/orchestrator-mode/orchestrator-goal-policy.md",
     ]) {
       const target = plan.targets.find((item) => item.id === id);
       if (

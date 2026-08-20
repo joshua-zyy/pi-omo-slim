@@ -8,10 +8,15 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 const STATE_ENTRY = "orchestrator-mode";
+const GOAL_STATE_ENTRY = "goal-state";
 const STATUS_KEY = "orchestrator-mode";
 const POLICY_PATH = join(
 	dirname(fileURLToPath(import.meta.url)),
 	"orchestrator-policy.md",
+);
+const GOAL_POLICY_PATH = join(
+	dirname(fileURLToPath(import.meta.url)),
+	"orchestrator-goal-policy.md",
 );
 const CONFIG_PATH = join(getAgentDir(), "orchestrator-mode.json");
 
@@ -23,19 +28,30 @@ type OrchestratorConfig = {
 	defaultEnabled?: boolean;
 };
 
-function loadPolicy(): { policy?: string; error?: string } {
+function loadPolicy(path: string, label: string): { policy?: string; error?: string } {
 	try {
-		const policy = readFileSync(POLICY_PATH, "utf8").trim();
+		const policy = readFileSync(path, "utf8").trim();
 		if (!policy) {
-			return { error: `Orchestrator policy is empty: ${POLICY_PATH}` };
+			return { error: `${label} is empty: ${path}` };
 		}
 		return { policy };
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		return {
-			error: `Unable to read orchestrator policy at ${POLICY_PATH}: ${message}`,
+			error: `Unable to read ${label} at ${path}: ${message}`,
 		};
 	}
+}
+
+function hasActiveGoal(ctx: ExtensionContext): boolean {
+	const branch = ctx.sessionManager.getBranch();
+	for (let index = branch.length - 1; index >= 0; index -= 1) {
+		const entry = branch[index];
+		if (entry.type !== "custom" || entry.customType !== GOAL_STATE_ENTRY) continue;
+		const data = entry.data as { goal?: { status?: unknown } | null } | undefined;
+		return data?.goal?.status === "active";
+	}
+	return false;
 }
 
 function loadConfig(): { defaultEnabled: boolean; error?: string } {
@@ -77,7 +93,8 @@ function loadConfig(): { defaultEnabled: boolean; error?: string } {
 }
 
 export default function orchestratorModeExtension(pi: ExtensionAPI) {
-	const loaded = loadPolicy();
+	const loaded = loadPolicy(POLICY_PATH, "Orchestrator policy");
+	const loadedGoalPolicy = loadPolicy(GOAL_POLICY_PATH, "Orchestrator Goal policy");
 	const config = loadConfig();
 	let enabled = config.defaultEnabled;
 
@@ -175,10 +192,13 @@ export default function orchestratorModeExtension(pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => restoreState(ctx));
 	pi.on("session_tree", async (_event, ctx) => restoreState(ctx));
 
-	pi.on("before_agent_start", async (event) => {
+	pi.on("before_agent_start", async (event, ctx) => {
 		if (!enabled || !loaded.policy) return;
+		const goalPolicy = hasActiveGoal(ctx) ? loadedGoalPolicy.policy : undefined;
 		return {
-			systemPrompt: `${event.systemPrompt}\n\n${loaded.policy}`,
+			systemPrompt: [event.systemPrompt, loaded.policy, goalPolicy]
+				.filter((part): part is string => Boolean(part))
+				.join("\n\n"),
 		};
 	});
 

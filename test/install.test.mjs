@@ -96,6 +96,7 @@ const TARGET_IDS = [
   "agents/verifier.md",
   "extensions/orchestrator-mode/index.ts",
   "extensions/orchestrator-mode/orchestrator-policy.md",
+  "extensions/orchestrator-mode/orchestrator-goal-policy.md",
   "orchestrator-mode.json",
   "subagents.json",
   "settings.json",
@@ -273,7 +274,7 @@ assert.equal(
 );
 
 // (3) All eight dependencies installed: plan succeeds, plan.pi.dependencies is
-// exactly the fixed eight packages, targets are exactly the current eleven,
+// exactly the fixed eight packages, targets are exactly the current twelve,
 // the plan carries schema_version 2, the parsed Pi version (bare output form)
 // with the enforced minimum, and every dependency's installed version.
 const case3Root = join(fixtureRoot, "case3-all-eight");
@@ -320,12 +321,12 @@ assert.deepEqual(
 assert.equal(
   plan.targets.length,
   TARGET_IDS.length,
-  "targets must be exactly the current eleven",
+  "targets must be exactly the current twelve",
 );
 assert.deepEqual(
   plan.targets.map((target) => target.id),
   TARGET_IDS,
-  "target IDs must be exactly the current eleven",
+  "target IDs must be exactly the current twelve",
 );
 
 // Rebuilds the fake Pi environment from an approved plan so apply re-runs the
@@ -360,7 +361,7 @@ function runApply(planPath, sha256Hex, extraEnv = {}) {
 
 // (4) Apply the case-3 approved plan with the exact SHA from stdout: the
 // install/backup/verification success path must exit 0, write a succeeded
-// result, record an 11-target manifest, and leave exactly the ten managed
+// result, record a 12-target manifest, and leave exactly the eleven managed
 // writes in place — while settings.json (observe-only) is never created.
 const approvedPlan = JSON.parse(readFileSync(planPath, "utf8"));
 const managedTargets = approvedPlan.targets.filter(
@@ -368,8 +369,8 @@ const managedTargets = approvedPlan.targets.filter(
 );
 assert.equal(
   managedTargets.length,
-  10,
-  "fresh-root plan must have exactly ten managed targets",
+  11,
+  "fresh-root plan must have exactly eleven managed targets",
 );
 assert.deepEqual(
   approvedPlan.targets
@@ -409,7 +410,7 @@ assert.equal(
 assert.equal(
   applyResult.operations.length,
   managedTargets.length,
-  "result.json must record exactly the ten managed operations",
+  "result.json must record exactly the eleven managed operations",
 );
 assert.ok(
   applyResult.operations.every((operation) => operation.type === "create"),
@@ -419,7 +420,7 @@ const successManifest = JSON.parse(readFileSync(applyResult.manifest, "utf8"));
 assert.equal(
   successManifest.targets.length,
   TARGET_IDS.length,
-  "manifest must have exactly the current eleven targets",
+  "manifest must have exactly the current twelve targets",
 );
 assert.deepEqual(
   successManifest.targets.map((item) => item.id),
@@ -447,6 +448,7 @@ for (const target of managedTargets) {
 for (const id of [
   "extensions/orchestrator-mode/index.ts",
   "extensions/orchestrator-mode/orchestrator-policy.md",
+  "extensions/orchestrator-mode/orchestrator-goal-policy.md",
 ]) {
   const target = managedTargets.find((item) => item.id === id);
   assert.equal(
@@ -484,7 +486,7 @@ assert.equal(
 
 // (5) Injected verification failure: a fresh config root and a fresh
 // one-time plan, applied with PI_OMO_INSTALL_TEST_MODE=1 and
-// PI_OMO_INSTALL_TEST_FAILURE=during_verification. All ten managed writes
+// PI_OMO_INSTALL_TEST_FAILURE=during_verification. All eleven managed writes
 // and the directories created for them must be rolled back exactly as the
 // plan's rollback contract describes, with no unresolved paths, while the
 // audit and backup records are retained and settings.json still never
@@ -509,8 +511,8 @@ const failureManaged = failurePlan.targets.filter(
 );
 assert.equal(
   failureManaged.length,
-  10,
-  "fresh-root plan must have exactly ten managed targets",
+  11,
+  "fresh-root plan must have exactly eleven managed targets",
 );
 assert.equal(
   failurePlan.rollback.delete_files.length,
@@ -632,7 +634,7 @@ const failureManifest = JSON.parse(
 assert.equal(
   failureManifest.targets.length,
   TARGET_IDS.length,
-  "backup manifest must cover all eleven targets",
+  "backup manifest must cover all twelve targets",
 );
 assert.ok(
   failureManifest.targets.every((item) => item.existed === false),
@@ -1167,55 +1169,64 @@ const orchestratorPolicy = readFileSync(
   ),
   "utf8",
 );
+const orchestratorGoalPolicy = readFileSync(
+  join(
+    projectRoot,
+    "extensions",
+    "orchestrator-mode",
+    "orchestrator-goal-policy.md",
+  ),
+  "utf8",
+);
 assert.match(
-  orchestratorPolicy,
-  /while a `\/goal` objective is active in this session/,
-  "policy must state activation in terms the model can observe",
+  orchestratorGoalPolicy,
+  /only while the current session has an active Goal/,
+  "Goal policy must state its active-Goal scope",
 );
 assert.ok(
-  !/present in the current system prompt snapshot/.test(orchestratorPolicy),
+  !/present in the current system prompt snapshot/.test(orchestratorGoalPolicy),
   "policy must not gate rules on a system prompt the model cannot inspect",
 );
 assert.ok(
-  !/`state=` of `planned`/.test(orchestratorPolicy),
+  !/`state=` of `planned`/.test(orchestratorGoalPolicy),
   "policy must not pin a lane state enum that nothing consumes",
 );
 assert.match(
-  orchestratorPolicy,
+  orchestratorGoalPolicy,
   /Separate lanes with a pipe that has one space on each side/,
   "policy must keep the single-line lane separator",
 );
 assert.match(
-  orchestratorPolicy,
-  /separate fields inside a lane with a semicolon followed by one space/,
+  orchestratorGoalPolicy,
+  /separate fields inside a lane with a semicolon followed by one space/i,
   "policy must keep the field separator",
 );
 assert.ok(
-  !/fields by `; ?`/.test(orchestratorPolicy),
+  !/fields by `; ?`/.test(orchestratorGoalPolicy),
   "lane separators must be described in prose so markdown autofix cannot strip their spaces",
 );
 assert.match(
-  orchestratorPolicy,
+  orchestratorGoalPolicy,
   /does not echo `metadata`/,
   "policy must keep lane records in description, not metadata",
 );
 assert.match(
-  orchestratorPolicy,
+  orchestratorGoalPolicy,
   /Never block on a non-terminal lane with `get_subagent_result\(wait: true\)`/,
   "policy must forbid blocking on a non-terminal background lane",
 );
 assert.match(
-  orchestratorPolicy,
-  /dispatch them as parallel background lanes in the same turn/,
+  orchestratorGoalPolicy,
+  /dispatch\s+them as parallel background lanes in the same turn/,
   "policy must bias an active Goal toward parallel background lanes",
 );
 assert.match(
-  orchestratorPolicy,
-  /never split one bounded action into artificial lanes/,
+  orchestratorGoalPolicy,
+  /never split one bounded action\s+into artificial lanes/,
   "policy must still allow a genuinely bounded Goal to be handled directly",
 );
 assert.match(
-  orchestratorPolicy,
+  orchestratorGoalPolicy,
   /resume_after_ms: 1800000/,
   "policy must keep the 30-minute goal_wait fallback",
 );

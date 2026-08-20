@@ -27,9 +27,9 @@ This document is the operational contract for an Agent after this repository is 
 
 ## 1. Inspect and collect choices
 
-Read `README.md`, `scripts/install.mjs`, all six `agents/*.md` templates, both files under `extensions/orchestrator-mode/`, and the two files under `config/`.
+Read `README.md`, `scripts/install.mjs`, all six `agents/*.md` templates, all three files under `extensions/orchestrator-mode/`, and the two files under `config/`.
 
-Inspect the following eleven destinations and list unrelated custom Agents:
+Inspect the following twelve destinations and list unrelated custom Agents:
 
 ```text
 agents/Explore.md
@@ -40,6 +40,7 @@ agents/fixer.md
 agents/verifier.md
 extensions/orchestrator-mode/index.ts
 extensions/orchestrator-mode/orchestrator-policy.md
+extensions/orchestrator-mode/orchestrator-goal-policy.md
 orchestrator-mode.json
 subagents.json
 settings.json
@@ -117,7 +118,7 @@ node scripts/install.mjs apply --plan <absolute-plan.json> --sha256 <approved-64
 `apply` rejects a changed plan, changed repository template, changed approved replacement, prior attempt, or occupied output path before configuration mutation. It then:
 
 1. creates `apply-started.json` so an interrupted plan cannot be silently retried;
-2. backs up the latest execution-time target state and writes an eleven-target `manifest.json`;
+2. backs up the latest execution-time target state and writes a twelve-target `manifest.json`;
 3. installs only approved Agent/extension files and merges only approved JSON fields;
 4. leaves `settings.json` live bytes untouched while backing up its latest state;
 5. runs fixed verification;
