@@ -59,6 +59,14 @@ node scripts/install.mjs apply --plan <absolute-plan.json> --sha256 <approved-pl
 
 不要手工编辑生成的计划，也不要静默覆盖同名自定义 Agent。当选项或已批准的替换冲突发生变化时，请重新生成新计划。
 
+安装完成后，用 `/orchestrator on` 启用 Orchestrator Mode，然后发送 `ping all agents` 做一次冒烟测试。六个专家 Agent 会被并行派发：
+
+![六个专家 Agent 被并行派发，各自在后台运行](assets/pingAllAgents_ex_1.png)
+
+随后它们逐一回应，确认六个角色齐备，且 Orchestrator 已就绪可以开始路由工作：
+
+![六个 Agent 全部回应 pong，Orchestrator 报告在线](assets/pingAllAgents_ex_2.png)
+
 ## 命令
 
 ```text

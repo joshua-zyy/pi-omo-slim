@@ -59,6 +59,14 @@ The default global configuration directory is `~/.pi/agent`. If `PI_CODING_AGENT
 
 Do not hand-edit a generated plan or silently overwrite same-name custom Agents. Generate a new plan whenever choices or an approved replacement conflict change.
 
+After installation, enable Orchestrator Mode with `/orchestrator on` and send `ping all agents` as a smoke test. All six specialists are dispatched in parallel:
+
+![Six specialist agents dispatched in parallel, each running in the background](assets/pingAllAgents_ex_1.png)
+
+Each one reports back, confirming the full roster with the Orchestrator ready to route work:
+
+![All six agents replying pong, with the Orchestrator reporting online](assets/pingAllAgents_ex_2.png)
+
 ## Commands
 
 ```text
