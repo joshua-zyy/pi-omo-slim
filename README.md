@@ -6,6 +6,8 @@
 
 A lightweight OMO-slim-style orchestration setup for [Pi](https://github.com/earendil-works/pi).
 
+The Orchestrator and specialist prompts in this repository are living documents: they are continuously refined as issues surface in day-to-day use, so the behavior of a freshly installed copy may drift ahead of an older one. Re-run the installer's `plan`/`apply` to pick up prompt updates.
+
 `pi-omo-slim` gives Pi a workflow-oriented Orchestrator and six focused specialist agents:
 
 - **Explorer** — local codebase reconnaissance;

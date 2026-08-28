@@ -6,6 +6,8 @@
 
 针对 [Pi](https://github.com/earendil-works/pi) 的轻量级 OMO-slim 风格编排配置。
 
+本仓库中的 Orchestrator 与专家 Agent 提示词是持续演进的文档：会随日常使用中发现的问题不断优化与更新，因此新安装副本的行为可能领先于旧副本。如需获取提示词更新，请重新执行安装器的 `plan`/`apply` 流程。
+
 `pi-omo-slim` 为 Pi 提供一个面向工作流的 Orchestrator（编排器）与六个专注的专家 Agent：
 
 - **Explorer** — 本地代码库侦察；
