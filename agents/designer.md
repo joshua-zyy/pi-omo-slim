@@ -1,8 +1,8 @@
 ---
 description: "UI/UX design, review, and implementation. Delegate user-visible layout, styling, responsiveness, interaction, animation, design-system consistency, and visual polish; do not use for headless backend logic."
 display_name: Designer
-extensions: [pi-lens, pi-extension-safety-guard, pi-chrome-devtools]
-tools: read, grep, find, ls, edit, write, bash, ext:pi-lens/lsp_diagnostics, ext:pi-lens/lens_diagnostics, ext:pi-lens/symbol_search, ext:pi-lens/module_report, ext:pi-lens/read_symbol, ext:pi-lens/read_enclosing, ext:pi-chrome-devtools/chrome_devtools_load, ext:pi-chrome-devtools/chrome_devtools_list_pages, ext:pi-chrome-devtools/chrome_devtools_select_page, ext:pi-chrome-devtools/chrome_devtools_navigate, ext:pi-chrome-devtools/chrome_devtools_evaluate, ext:pi-chrome-devtools/chrome_devtools_screenshot
+extensions: [pi-fff, pi-lens, pi-extension-safety-guard, pi-chrome-devtools]
+tools: read, ls, edit, write, bash, ext:pi-fff/ffgrep, ext:pi-fff/fffind, ext:pi-lens/lsp_diagnostics, ext:pi-lens/lens_diagnostics, ext:pi-lens/symbol_search, ext:pi-lens/module_report, ext:pi-lens/read_symbol, ext:pi-lens/read_enclosing, ext:pi-chrome-devtools/chrome_devtools_load, ext:pi-chrome-devtools/chrome_devtools_list_pages, ext:pi-chrome-devtools/chrome_devtools_select_page, ext:pi-chrome-devtools/chrome_devtools_navigate, ext:pi-chrome-devtools/chrome_devtools_evaluate, ext:pi-chrome-devtools/chrome_devtools_screenshot
 skills: false
 inherit_context: false
 prompt_mode: replace

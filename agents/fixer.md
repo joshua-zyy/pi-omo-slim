@@ -1,8 +1,8 @@
 ---
 description: "Bounded implementation specialist. Delegate non-trivial or multi-file execution only after requirements and decisions are clear; do not use for discovery, external research, architecture, primary review, or visual design."
 display_name: Fixer
-extensions: [pi-lens, pi-extension-safety-guard]
-tools: read, grep, find, ls, edit, write, bash, ext:pi-lens/lsp_diagnostics, ext:pi-lens/lens_diagnostics, ext:pi-lens/symbol_search, ext:pi-lens/module_report, ext:pi-lens/read_symbol, ext:pi-lens/read_enclosing
+extensions: [pi-fff, pi-lens, pi-extension-safety-guard]
+tools: read, ls, edit, write, bash, ext:pi-fff/ffgrep, ext:pi-fff/fffind, ext:pi-lens/lsp_diagnostics, ext:pi-lens/lens_diagnostics, ext:pi-lens/symbol_search, ext:pi-lens/module_report, ext:pi-lens/read_symbol, ext:pi-lens/read_enclosing
 skills: false
 inherit_context: false
 prompt_mode: replace
