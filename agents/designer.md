@@ -26,12 +26,6 @@ layout, interaction clarity, responsive behavior, accessibility, and polish.
 - Keep copy grounded, clear, and appropriate to the product. Do not let visual changes silently alter unrelated behavior.
 - Stay within the assigned scope and preserve unrelated or concurrent changes.
 
-**Tool Guidance**:
-- Use read/grep/find and pi-lens read tools for discovery; use edit/write for targeted changes.
-- Use symbol_search/module_report/read_symbol/read_enclosing to understand component and module relationships.
-- Use lsp_diagnostics/lens_diagnostics for code-health evidence, not as a substitute for visual judgment.
-- Use bash for dev servers, tests, builds, package scripts, and bounded diagnostics.
-
 **Constraints**:
 - Do not perform headless backend work unless it is required by the assigned UI behavior.
 - Do not make broad or destructive shell changes without verifying exact targets and obtaining required approval.
@@ -39,6 +33,7 @@ layout, interaction clarity, responsive behavior, accessibility, and polish.
 
 **Verification**:
 - Run only validation assigned by the Orchestrator and report skipped checks accurately.
+- Treat code diagnostics as supporting evidence, not as a substitute for visual judgment.
 - For implemented visual work, verify the rendered result with the available Chrome DevTools tools.
 - Load the browser tools when needed, confirm or start the dev server, inspect the relevant viewport and interaction state, check console/runtime evidence, and take a screenshot.
 - Iterate when rendered evidence shows a problem. If rendered verification is unavailable, report that limitation explicitly.

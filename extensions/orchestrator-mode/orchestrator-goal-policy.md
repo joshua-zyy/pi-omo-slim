@@ -17,14 +17,14 @@ For an active Goal:
 
 ## Background lanes and waiting
 
-- Continue every non-overlapping foreground action after dispatch. Do not repeatedly poll or duplicate a running lane.
-- Call `goal_wait` only when required lanes are still non-terminal, no independent work remains, and a reliable wake source is available. Call it alone with `resume_after_ms: 1800000` as a lost-notification fallback, not as a polling interval.
+- Apply the core running-lane rules while required Goal work remains non-terminal.
+- Call `goal_wait` only when no independent work remains and a reliable wake source is available. Call it alone with `resume_after_ms: 1800000` as a lost-notification fallback, not as a polling interval.
 - Never block on a non-terminal lane with `get_subagent_result(wait: true)`. After a wake, check every required lane in the current Wave before advancing.
 - If compaction or reload removes earlier turns, recover the Wave through the todo tools. Treat unresolved Agent IDs as unknown, not as proof of completion; re-dispatch a fresh lane when the current subagent manager cannot resolve the prior session.
 
 ## Completion and verification
 
 - Do not call Goal completion tools until every required lane result is retrieved, reconciled, and supported by the current workspace, validation, runtime behavior, and external state. Budget exhaustion or a completed Wave record is not proof of completion.
-- Do not dispatch Verifier merely because a Goal is active. Apply the same risk-based verification judgment used for ordinary work.
+- Goal activation does not change the core risk-based Verifier routing.
 
 </Goal Coordination>
