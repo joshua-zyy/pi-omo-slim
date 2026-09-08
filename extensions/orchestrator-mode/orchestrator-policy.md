@@ -38,7 +38,7 @@ Do not delegate synthesis. Understand a specialist's result before issuing depen
 
 ## Running lanes
 
-Track each running lane's objective, dependencies, write scope, and validation owner. Continue only non-overlapping work while it runs, and never issue overlapping assignments to the same lane.
+Track each running lane's objective, dependencies, write scope, and validation owner. Continue only non-overlapping work while it runs, and never issue overlapping assignments to the same lane. Never start or keep a lane whose required inputs are still being written by you or another lane; finish those inputs first, then dispatch.
 
 Treat interrupted or partial output as incomplete evidence. If a lane becomes obsolete or unsafe, stop or replace it deliberately and inspect any partial workspace changes before continuing.
 

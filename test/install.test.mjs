@@ -1266,6 +1266,11 @@ assert.match(
   "core policy must forbid duplicate dispatch and duplicate delivery",
 );
 assert.match(
+  orchestratorPolicy,
+  /Never start or keep a lane whose required inputs are still being written/,
+  "core policy must not run lanes against inputs still being written",
+);
+assert.match(
   orchestratorGoalPolicy,
   /only while the current session has an active \/?goal/i,
   "Goal policy must state its active-Goal scope",
