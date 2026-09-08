@@ -15,7 +15,7 @@ The Orchestrator and specialist prompts in this repository are living documents:
 - **Oracle** — architecture, debugging strategy, review, and simplification;
 - **Designer** — UI/UX design, review, and implementation;
 - **Fixer** — bounded, non-visual implementation;
-- **Verifier** — independent review and bounded validation of completed Fixer work.
+- **Verifier** — independent review and bounded validation of completed implementation work (typically Fixer output).
 
 This project is a configuration bundle. It does not fork Pi, `pi-subagents`, or OMO-slim. It adapts OMO-slim's role boundaries and orchestration approach to the extension and subagent APIs that Pi actually provides.
 
@@ -32,7 +32,7 @@ This project is a configuration bundle. It does not fork Pi, `pi-subagents`, or 
   - `@narumitw/pi-goal`
   - `@tintinweb/pi-tasks` — **>= 0.9.0**: the task-tracking release the orchestrator's task contract is written and tested against; the installer enforces this minimum at `plan` time
 
-The Agent templates in this repository do not pin a provider, model, or thinking level. By default, they inherit those settings from the parent Agent. During installation, you can choose to inherit everything, apply one shared configuration to all six roles, or configure each role separately. Any pinned model must be selected from the models available in your current Pi environment. The installing Agent modifies only the copies written to your Pi configuration directory, never the source templates in this repository.
+The Agent templates in this repository do not pin a model or thinking level. By default, they inherit those settings from the parent Agent. During installation, you can choose to inherit everything, apply one shared configuration to all six roles, or configure each role separately. Any pinned model must be selected from the models available in your current Pi environment. The installing Agent modifies only the copies written to your Pi configuration directory, never the source templates in this repository.
 
 ## Recommended installation
 
@@ -112,7 +112,7 @@ The Orchestrator keeps only the current Wave/stage checkpoint and creates execut
 
 ## Differences from OMO-slim on OpenCode
 
-This project is an adaptation and does not claim complete runtime parity. Pi's `Agent`, `get_subagent_result`, and `steer_subagent` mechanisms cover the main workflow, but they do not reproduce every OMO-slim/OpenCode facility exactly. Although `pi-subagents` also provides `resume`, this project treats completed specialist sessions as terminal and does not depend on session reuse. In particular, this project does not claim to provide OMO-slim's Background Job Board, Wake Scheduler, or identical task-cancellation behavior.
+This project is an adaptation and does not claim complete runtime parity. Pi's `Agent`, `get_subagent_result`, and `steer_subagent` mechanisms cover the main workflow, but they do not reproduce every OMO-slim/OpenCode facility exactly. Although `pi-subagents` also provides `resume`, this project does not depend on session reuse: the Orchestrator policy reuses a completed specialist only when the same role and lane still apply and the session is resolvable, and otherwise starts a fresh specialist. In particular, this project does not claim to provide OMO-slim's Background Job Board, Wake Scheduler, or identical task-cancellation behavior.
 
 Designer and Fixer can write files and run shell commands. Oracle and Verifier have no file-writing tools but can run bounded shell diagnostics or validation. The Safety Guard extension is an additional lifecycle defense, not an operating-system sandbox or a substitute for user approval and project-specific instructions.
 

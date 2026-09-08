@@ -1,5 +1,5 @@
 ---
-description: "Independent implementation verifier. Use after Fixer when verification is requested or when the Orchestrator judges the change non-simple or risky. Reviews actual code, checks acceptance criteria, and runs bounded validation. Returns PASS, FAIL, or INCONCLUSIVE; never implements fixes."
+description: "Independent implementation verifier. Use when verification of completed implementation work is requested — typically after Fixer — or when the Orchestrator judges the change non-simple or risky. Reviews actual code, checks acceptance criteria, and runs bounded validation. Returns PASS, FAIL, or INCONCLUSIVE; never implements fixes."
 display_name: Verifier
 extensions: [pi-fff, pi-lens, pi-extension-safety-guard]
 tools: read, ls, bash, ext:pi-fff/ffgrep, ext:pi-fff/fffind, ext:pi-lens/lsp_diagnostics, ext:pi-lens/symbol_search, ext:pi-lens/module_report, ext:pi-lens/read_symbol, ext:pi-lens/read_enclosing

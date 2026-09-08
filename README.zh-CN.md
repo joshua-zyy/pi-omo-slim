@@ -15,7 +15,7 @@
 - **Oracle** — 架构、调试策略、评审与简化；
 - **Designer** — UI/UX 设计、评审与实现；
 - **Fixer** — 有界的非视觉实现；
-- **Verifier** — 对已完成 Fixer 工作的独立评审与有界验证。
+- **Verifier** — 对已完成实现工作的独立评审与有界验证（通常是 Fixer 的产出）。
 
 本项目是一个配置包。它不 fork Pi、`pi-subagents` 或 OMO-slim，而是把 OMO-slim 的角色边界与编排方法适配到 Pi 实际提供的扩展与子 Agent API 之上。
 
@@ -32,7 +32,7 @@
   - `@narumitw/pi-goal`
   - `@tintinweb/pi-tasks` — **>= 0.9.0**：Orchestrator 任务契约所依据并测试的版本，安装器会在 `plan` 阶段强制此下限
 
-本仓库中的 Agent 模板不固定 provider、模型或思考级别。默认情况下，它们继承父 Agent 的这些设置。安装期间，你可以选择全部继承、为六个角色统一应用一份共享配置，或为每个角色单独配置。任何固定的模型都必须选自你当前 Pi 环境中可用的模型。安装 Agent 只修改写入你 Pi 配置目录的副本，绝不修改本仓库中的源模板。
+本仓库中的 Agent 模板不固定模型或思考级别。默认情况下，它们继承父 Agent 的这些设置。安装期间，你可以选择全部继承、为六个角色统一应用一份共享配置，或为每个角色单独配置。任何固定的模型都必须选自你当前 Pi 环境中可用的模型。安装 Agent 只修改写入你 Pi 配置目录的副本，绝不修改本仓库中的源模板。
 
 ## 推荐安装方式
 
@@ -112,7 +112,7 @@ Orchestrator 只保留当前 Wave/阶段检查点，并按实际委派的工作�
 
 ## 与 OpenCode 上 OMO-slim 的差异
 
-本项目是适配版本，不声称具有完全的运行时对等性。Pi 的 `Agent`、`get_subagent_result` 与 `steer_subagent` 机制覆盖了主要工作流，但并未逐项复刻 OMO-slim/OpenCode 的每一项设施。尽管 `pi-subagents` 也提供 `resume`，本项目仍将已完成的专家会话视为终结性会话，不依赖会话复用。具体而言，本项目不声称提供 OMO-slim 的后台任务板（Background Job Board）、唤醒调度器（Wake Scheduler）或完全一致的任务取消行为。
+本项目是适配版本，不声称具有完全的运行时对等性。Pi 的 `Agent`、`get_subagent_result` 与 `steer_subagent` 机制覆盖了主要工作流，但并未逐项复刻 OMO-slim/OpenCode 的每一项设施。尽管 `pi-subagents` 也提供 `resume`，本项目不依赖会话复用：仅当角色与 lane 不变且会话仍可解析时，Orchestrator policy 才复用已完成的专家，否则启动全新专家。具体而言，本项目不声称提供 OMO-slim 的后台任务板（Background Job Board）、唤醒调度器（Wake Scheduler）或完全一致的任务取消行为。
 
 Designer 与 Fixer 可以写文件并运行 shell 命令。Oracle 与 Verifier 没有写文件工具，但可以运行有界的 shell 诊断或验证。Safety Guard 扩展是额外的生命周期防御，而非操作系统级沙箱，也不能替代用户批准与项目专属指令。
 
