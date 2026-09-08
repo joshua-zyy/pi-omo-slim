@@ -43,7 +43,7 @@ const DEPENDENCIES = [
   "npm:@firstpick/pi-extension-safety-guard",
   "npm:@narumitw/pi-chrome-devtools",
   "npm:@narumitw/pi-goal",
-  "npm:@juicesharp/rpiv-todo",
+  "npm:@tintinweb/pi-tasks",
 ];
 const THINKING = new Set([
   "inherit",
@@ -62,14 +62,16 @@ const ACTIONS = new Set(["install", "keep", "replace"]);
 // A model identifier is either a bare id (pi-subagents frontmatter accepts
 // fuzzy names) or a provider/model pair; both forms come from pi --list-models.
 const MODEL_ID_RE = /^[A-Za-z0-9_.:@+~/-]+$/;
-const PI_MINIMUM_VERSION = "0.80.6";
+const PI_MINIMUM_VERSION = "0.84.0";
 const PI_SUBAGENTS_IDENTIFIER = "npm:@tintinweb/pi-subagents";
-const PI_SUBAGENTS_MINIMUM_VERSION = "0.15.0";
+const PI_SUBAGENTS_MINIMUM_VERSION = "0.19.0";
+const PI_TASKS_IDENTIFIER = "npm:@tintinweb/pi-tasks";
+const PI_TASKS_MINIMUM_VERSION = "0.9.0";
 const PLAN_SCHEMA_VERSION = 2;
 // The first `major.minor.patch` token in the output: real `pi --version`
 // prints a bare version and test doubles print a `pi x.y.z` prefix, so the
 // leading `(?:^|\s)` tolerates both. Comparison is numeric, never string
-// ordering (0.9.0 must sort below 0.80.6).
+// ordering (0.9.0 must sort below 0.84.0).
 const VERSION_TOKEN_RE =
   /(?:^|\s)(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?(?=\s|$)/;
 // One `pi list` package line: an npm identifier, optionally suffixed with
@@ -416,8 +418,9 @@ function inventoryPi(configRoot) {
   if (compareVersions(version, parseVersion(PI_MINIMUM_VERSION)) < 0)
     fail(
       `Pi ${versionText} is below the required minimum ${PI_MINIMUM_VERSION}: ` +
-        `@narumitw/pi-goal depends on Pi's agent_settled lifecycle event, so ` +
-        `planning stops fail-closed. Update Pi and generate a new plan.`,
+        `the enforced @tintinweb/pi-subagents ${PI_SUBAGENTS_MINIMUM_VERSION} ` +
+        `declares a Pi >= ${PI_MINIMUM_VERSION} dependency, so planning stops ` +
+        `fail-closed. Update Pi and generate a new plan.`,
     );
   const listOutput = runPi(executable, ["list"], configRoot);
   const listedPackages = inventoryListedPackages(listOutput);
@@ -444,11 +447,27 @@ function inventoryPi(configRoot) {
       )
         fail(
           `${dependency} ${dependencyVersion ?? "installed version unknown"} is below the required minimum ` +
-            `${PI_SUBAGENTS_MINIMUM_VERSION}: strict routing's ` +
-            `fallbackSubagent: "none" only exists from ` +
-            `${PI_SUBAGENTS_MINIMUM_VERSION}, so an older release would silently ` +
-            `fall back to the permissive general-purpose Agent. Planning stops ` +
-            `fail-closed; update the package and generate a new plan.`,
+            `${PI_SUBAGENTS_MINIMUM_VERSION}: this is the task-dispatch baseline ` +
+            `this repository is tested against; releases below 0.18.2 also ` +
+            `answer the same protocol ping without RPC-spawn model-scope ` +
+            `enforcement. Planning stops fail-closed; update the package and ` +
+            `generate a new plan.`,
+        );
+    }
+    if (dependency === PI_TASKS_IDENTIFIER) {
+      const dependencyParts = parseVersion(dependencyVersion);
+      if (
+        !dependencyParts ||
+        compareVersions(
+          dependencyParts,
+          parseVersion(PI_TASKS_MINIMUM_VERSION),
+        ) < 0
+      )
+        fail(
+          `${dependency} ${dependencyVersion ?? "installed version unknown"} is below the required minimum ` +
+            `${PI_TASKS_MINIMUM_VERSION}: this is the task-tracking release the ` +
+            `orchestrator's task contract is written and tested against, so ` +
+            `planning stops fail-closed. Update the package and generate a new plan.`,
         );
     }
     dependencyVersions[dependency] = dependencyVersion;
@@ -817,6 +836,19 @@ function validatePlan(plan, planPath) {
       )
         fail(
           `${identifier} version ${dependencyVersion} in plan is below the required minimum ${PI_SUBAGENTS_MINIMUM_VERSION}`,
+        );
+    }
+    if (identifier === PI_TASKS_IDENTIFIER) {
+      const dependencyParts = parseVersion(dependencyVersion);
+      if (
+        !dependencyParts ||
+        compareVersions(
+          dependencyParts,
+          parseVersion(PI_TASKS_MINIMUM_VERSION),
+        ) < 0
+      )
+        fail(
+          `${identifier} version ${dependencyVersion} in plan is below the required minimum ${PI_TASKS_MINIMUM_VERSION}`,
         );
     }
   }

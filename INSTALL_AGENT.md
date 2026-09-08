@@ -7,7 +7,7 @@ This document is the operational contract for an Agent after this repository is 
 1. Resolve the repository root, Pi executable, and actual absolute Pi configuration root. If `PI_CODING_AGENT_DIR` is set, use it; otherwise confirm the platform's global Pi configuration directory with the user.
 2. Inspect before changing state. Do not overwrite or update an existing clone or Pi configuration without the approval required below.
 3. Use `scripts/install.mjs` as the only installation entry point. Do not create ad hoc Shell, JavaScript, Python, or other installation, backup, verification, or rollback programs.
-4. The installer never installs or removes packages. All eight dependencies must already be present, and the installer enforces minimum versions: Pi >= 0.80.6 (`@narumitw/pi-goal` needs Pi's `agent_settled` lifecycle) and `npm:@tintinweb/pi-subagents` >= 0.15.0 (strict routing's `fallbackSubagent: "none"` requires it):
+4. The installer never installs or removes packages. All eight dependencies must already be present, and the installer enforces minimum versions: Pi >= 0.84.0 (the enforced `npm:@tintinweb/pi-subagents` 0.19.0 declares a Pi >= 0.84.0 dependency), `npm:@tintinweb/pi-subagents` >= 0.19.0 (the task-dispatch baseline this project is tested against; releases below 0.18.2 answer the protocol ping without RPC-spawn model-scope enforcement), and `npm:@tintinweb/pi-tasks` >= 0.9.0 (the task-tracking release the orchestrator's task contract is written against):
 
    ```text
    npm:@tintinweb/pi-subagents
@@ -17,11 +17,11 @@ This document is the operational contract for an Agent after this repository is 
    npm:@firstpick/pi-extension-safety-guard
    npm:@narumitw/pi-chrome-devtools
    npm:@narumitw/pi-goal
-   npm:@juicesharp/rpiv-todo
+   npm:@tintinweb/pi-tasks
    ```
 
 5. If a dependency is missing or its installed version is below the enforced minimum, stop. Show only the missing fixed `pi install npm:<package>` commands, obtain separate approval, run them, and then generate a new plan.
-6. Never modify model credentials, providers, unrelated Agents, installed-package source code, or project templates.
+6. Never modify model credentials, providers, unrelated Agents, installed-package source code, or project templates. Task-tool configuration (`tasks-config.json`) is entirely user-managed: this project never creates or modifies it, including options such as `autoCascade`.
 7. Never hand-edit `plan.json`. A new choice or environmental change requires a new plan.
 8. An approved plan SHA authorizes only the listed writes and the listed automatic rollback deletions. Any unrelated cleanup or later manual rollback requires separate approval.
 
@@ -92,8 +92,8 @@ If planning fails, stop. Do not repair configuration or improvise another comman
 
 Read the generated `plan.json` and present:
 
-- repository/configuration roots, the Pi version, and the enforced Pi minimum (>= 0.80.6);
-- each dependency's installed version and the enforced `npm:@tintinweb/pi-subagents` >= 0.15.0 minimum;
+- repository/configuration roots, the Pi version, and the enforced Pi minimum (>= 0.84.0);
+- each dependency's installed version and the enforced `npm:@tintinweb/pi-subagents` >= 0.19.0 and `npm:@tintinweb/pi-tasks` >= 0.9.0 minimums;
 - every role's action, model, and thinking choice;
 - strict or compatibility routing behavior;
 - Orchestrator default;

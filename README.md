@@ -21,16 +21,16 @@ This project is a configuration bundle. It does not fork Pi, `pi-subagents`, or 
 
 ## Requirements
 
-- Pi; requires **>= 0.80.6** because `@narumitw/pi-goal` depends on Pi's `agent_settled` lifecycle; the installer enforces this minimum at `plan` time and rejects an older Pi fail-closed. This release was integration-accepted with **0.84.2** (the repository's `@earendil-works/pi-coding-agent` dev dependency is not changed);
+- Pi; requires **>= 0.84.0** because the enforced `@tintinweb/pi-subagents` 0.19.0 declares a Pi >= 0.84.0 dependency; the installer enforces this minimum at `plan` time and rejects an older Pi fail-closed. This release was integration-accepted with **0.84.2** (the repository's `@earendil-works/pi-coding-agent` dev dependency is not changed);
 - the following Pi packages:
-  - `@tintinweb/pi-subagents` — **>= 0.15.0**: strict routing's `fallbackSubagent: "none"` only exists from that release, and the installer enforces this minimum at `plan` time
+  - `@tintinweb/pi-subagents` — **>= 0.19.0**: the task-dispatch baseline this project is tested against (releases below 0.18.2 also answer the protocol ping without RPC-spawn model-scope enforcement); the installer enforces this minimum at `plan` time
   - `@ff-labs/pi-fff`
   - `pi-web-access`
   - `pi-lens`
   - `@firstpick/pi-extension-safety-guard`
   - `@narumitw/pi-chrome-devtools`
   - `@narumitw/pi-goal`
-  - `@juicesharp/rpiv-todo`
+  - `@tintinweb/pi-tasks` — **>= 0.9.0**: the task-tracking release the orchestrator's task contract is written and tested against; the installer enforces this minimum at `plan` time
 
 The Agent templates in this repository do not pin a provider, model, or thinking level. By default, they inherit those settings from the parent Agent. During installation, you can choose to inherit everything, apply one shared configuration to all six roles, or configure each role separately. Any pinned model must be selected from the models available in your current Pi environment. The installing Agent modifies only the copies written to your Pi configuration directory, never the source templates in this repository.
 
@@ -48,7 +48,7 @@ Repository cloning and Pi configuration installation are two separate approval c
 
 ## Deterministic installation outline
 
-Install the eight required packages separately before planning; `plan` enforces the Pi >= 0.80.6 and `@tintinweb/pi-subagents` >= 0.15.0 minimums. Then create the closed `request.json` documented in `INSTALL_AGENT.md` and run:
+Install the eight required packages separately before planning; `plan` enforces the Pi >= 0.84.0, `@tintinweb/pi-subagents` >= 0.19.0, and `@tintinweb/pi-tasks` >= 0.9.0 minimums. Then create the closed `request.json` documented in `INSTALL_AGENT.md` and run:
 
 ```text
 node scripts/install.mjs plan --request <absolute-request.json> --config-root <absolute-config-root>
@@ -92,7 +92,7 @@ The effective state priority is: the latest explicit state in the current sessio
 
 ## Goal integration
 
-`@juicesharp/rpiv-todo` is a fixed dependency, so after installation all modes gain its native `todo` tool, `/todos` UI, and default guidance.
+`@tintinweb/pi-tasks` is a fixed dependency, so after installation all modes gain its native task tools and default guidance. Its configuration file `tasks-config.json` is entirely user-managed: this project never creates or modifies it, and it neither relies on nor changes options such as `autoCascade` (upstream default: off).
 
 Goals are always user-initiated. You must explicitly run a native `pi-goal` command, for example:
 
@@ -106,11 +106,9 @@ The Orchestrator never auto-starts a Goal, and this project provides no UltraGoa
 - In the default mode, `/goal` follows `pi-goal`'s native workflow only; the Orchestrator's Wave discipline is not applied.
 - In Orchestrator Mode, `/goal` keeps `pi-goal`'s native semantics and additionally biases separable work toward parallel background specialist lanes, with one current-Wave checkpoint, background-subagent waiting coordination, and the existing risk routing.
 
-`rpiv-todo` maintains only the current Wave/stage checkpoint; it does not track every subagent's live status, which remains authoritative in Pi's Agent tools. The Orchestrator policy is a prompt-level behavior contract, not a mandatory state machine that replaces `pi-goal`'s or `rpiv-todo`'s runtime validation.
+The Orchestrator keeps only the current Wave/stage checkpoint and creates execution tasks per delegated work unit; it never hand-copies subagent live status, which remains authoritative in Pi's Agent and task tools. A task reaching completion is not acceptance on its own — results are accepted only after verification against the actual workspace. The Orchestrator policy is a prompt-level behavior contract, not a mandatory state machine that replaces `pi-goal`'s or `pi-tasks`'s runtime validation.
 
 `pi-goal`'s native token budget counts only assistant usage in the main session branch; it does not include the independent subagent sessions the Orchestrator dispatches. This project does not aggregate those usages, and `/goal --tokens` is not a total cap that covers specialist consumption. The number of lanes or `max_turns` is not a token-budget substitute.
-
-`@juicesharp/rpiv-i18n` is an optional peer of `rpiv-todo`; without it the UI falls back to English and todo functionality is unaffected. This project never writes `rpiv-todo` guidance configuration; you keep the upstream defaults and the right to configure it yourself.
 
 ## Differences from OMO-slim on OpenCode
 
@@ -142,14 +140,14 @@ This project asks users to install, but does not vendor, the following independe
 
 | Package | Tested version | Upstream repository |
 | --- | ---: | --- |
-| `@tintinweb/pi-subagents` | 0.15.0 | <https://github.com/tintinweb/pi-subagents> |
+| `@tintinweb/pi-subagents` | 0.19.0 | <https://github.com/tintinweb/pi-subagents> |
 | `@ff-labs/pi-fff` | 0.10.3 | <https://github.com/dmtrKovalenko/fff> |
 | `pi-web-access` | 0.21.0 | <https://github.com/nicobailon/pi-web-access> |
 | `pi-lens` | 3.8.74 | <https://github.com/apmantza/pi-lens> |
 | `@firstpick/pi-extension-safety-guard` | 0.2.7 | <https://github.com/Firstp1ck/pi-coding-agent-forge> |
 | `@narumitw/pi-chrome-devtools` | 0.52.0 | <https://github.com/narumiruna/pi-extensions/tree/main/packages/pi-chrome-devtools> |
 | `@narumitw/pi-goal` | 0.51.0 | <https://github.com/narumiruna/pi-extensions> |
-| `@juicesharp/rpiv-todo` | 2.6.0 | <https://github.com/juicesharp/rpiv-mono> |
+| `@tintinweb/pi-tasks` | 0.9.0 | <https://github.com/tintinweb/pi-tasks> |
 
 These dependencies remain subject to their respective upstream licenses. The authoritative license and notices are those included with the versions users actually install.
 

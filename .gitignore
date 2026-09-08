@@ -1,5 +1,6 @@
 node_modules/
 *.tsbuildinfo
 .worktrees/
+.pi/
 /docs/superpowers/
 /docs/plans

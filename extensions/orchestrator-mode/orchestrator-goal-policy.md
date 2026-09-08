@@ -12,15 +12,16 @@ For an active Goal:
 
 - When two or more substantial work items are genuinely independent, dispatch them as parallel background lanes in the same turn. Do not parallelize work with unresolved dependencies or conflicting write scopes.
 - Handle a genuinely bounded Goal directly, and never split one bounded action into artificial lanes.
-- Keep exactly one current Wave or stage `todo` owned by you; never create a per-specialist todo. Store the lane record in that todo's `description`, because model-visible `todo` output does not echo `metadata`, and keep it on one line because that rendering collapses newlines.
-- Separate lanes with a pipe that has one space on each side. Separate fields inside a lane with a semicolon followed by one space. Record each lane's name, `role=`, observed `state=`, and, after dispatch, `id=` plus final `out=`. Update the record only as events are observed; the Agent tools remain the source of truth for live status.
+- Keep exactly one current Wave or stage checkpoint as a non-executable task without `agentType`. In its `description`, record the current `goal_id`, member task IDs (or Agent IDs for native dispatch), acceptance decisions, and evidence references. Keep it open until you have accepted every required result.
+- Create execution tasks per work unit when structured tracking is needed, not per specialist role. Query task and Agent tools for live status; do not copy it into the checkpoint.
 
 ## Background lanes and waiting
 
 - Apply the core running-lane rules while required Goal work remains non-terminal.
 - Call `goal_wait` only when no independent work remains and a reliable wake source is available. Call it alone with `resume_after_ms: 1800000` as a lost-notification fallback, not as a polling interval.
-- Never block on a non-terminal lane with `get_subagent_result(wait: true)`. After a wake, check every required lane in the current Wave before advancing.
-- If compaction or reload removes earlier turns, recover the Wave through the todo tools. Treat unresolved Agent IDs as unknown, not as proof of completion; re-dispatch a fresh lane when the current subagent manager cannot resolve the prior session.
+- Never block on a non-terminal lane with `get_subagent_result(wait: true)` or `TaskOutput(block: true)`. After a wake, check every required lane in the current Wave before advancing.
+- Apply the core acceptance rules before completing the checkpoint; do not treat task `completed` as acceptance.
+- Recover the current Wave from its checkpoint and available task records after compaction or reload. Treat missing records and unresolved Agent IDs as unknown, not as success or proof that execution stopped. Reconcile available results, relevant artifacts or sources, and live execution before rebuilding the checkpoint or deciding to re-dispatch.
 
 ## Completion and verification
 

@@ -13,10 +13,14 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 // Cross-platform local test for scripts/install.mjs's fixed dependency gate,
-// the enforced Pi (>= 0.80.6) and pi-subagents (>= 0.15.0) version minimums,
-// the plan schema_version 2 contract, the Task 3 documentation surface
-// (INSTALL_AGENT.md, README.md, README.zh-CN.md), and the Task 4
-// apply/rollback acceptance: the full install/backup/verification success
+// the enforced Pi (>= 0.84.0), pi-subagents (>= 0.19.0), and pi-tasks
+// (>= 0.9.0) version minimums,
+// the plan schema_version 2 contract, the documentation and policy surface
+// (INSTALL_AGENT.md, README.md, README.zh-CN.md, both orchestrator policies)
+// including the pi-tasks migration semantics — one dispatch entry per work
+// item, acceptance through actual verification without duplicate dispatch or
+// delivery, and user-managed tasks-config.json — and the apply/rollback
+// acceptance: the full install/backup/verification success
 // path for an approved eight-dependency plan, plus a transaction rollback
 // with an injected verification failure. Uses an isolated temporary fixture
 // and a fake Pi executable, so it never touches a real Pi installation, its
@@ -41,14 +45,14 @@ if (process.platform === "win32" && /["&|<>^%!\r\n]/.test(fixtureRoot)) {
 // --- Fake Pi ---------------------------------------------------------------
 // Answers the three invocations the installer makes (--version, list,
 // --list-models) from environment variables; never a real Pi. FAKE_PI_VERSION
-// is printed verbatim (default keeps the historical `pi 0.83.0` prefix form,
+// is printed verbatim (default keeps the historical `pi x.y.z` prefix form,
 // and bare "0.84.2" is used to cover the real-world bare output form).
 const fakePiImpl = join(binDir, "fake-pi.mjs");
 writeFileSync(
   fakePiImpl,
   [
     "const args = process.argv.slice(2);",
-    'if (args.includes("--version")) { process.stdout.write((process.env.FAKE_PI_VERSION || "pi 0.83.0") + "\\n"); process.exit(0); }',
+    'if (args.includes("--version")) { process.stdout.write((process.env.FAKE_PI_VERSION || "pi 0.84.2") + "\\n"); process.exit(0); }',
     'if (args.includes("list")) { process.stdout.write(process.env.FAKE_PI_PACKAGES || ""); process.exit(0); }',
     'if (args.includes("--list-models")) { process.stdout.write(process.env.FAKE_PI_MODELS || "gpt-5\\n"); process.exit(0); }',
     'process.stderr.write("unexpected fake pi args: " + args.join(" ") + "\\n");',
@@ -85,7 +89,7 @@ const ORIGINAL_DEPENDENCIES = [
 const FIXED_DEPENDENCIES = [
   ...ORIGINAL_DEPENDENCIES,
   "npm:@narumitw/pi-goal",
-  "npm:@juicesharp/rpiv-todo",
+  "npm:@tintinweb/pi-tasks",
 ];
 const TARGET_IDS = [
   "agents/Explore.md",
@@ -116,14 +120,14 @@ const ROLES = [
 // exercised exactly as in production.
 const packageRoot = join(fixtureRoot, "packages");
 const DEFAULT_PACKAGE_VERSIONS = {
-  "npm:@tintinweb/pi-subagents": "0.15.0",
+  "npm:@tintinweb/pi-subagents": "0.19.0",
   "npm:@ff-labs/pi-fff": "0.10.3",
   "npm:pi-web-access": "0.21.0",
   "npm:pi-lens": "3.8.74",
   "npm:@firstpick/pi-extension-safety-guard": "0.2.7",
   "npm:@narumitw/pi-chrome-devtools": "0.52.0",
   "npm:@narumitw/pi-goal": "0.51.0",
-  "npm:@juicesharp/rpiv-todo": "2.6.0",
+  "npm:@tintinweb/pi-tasks": "0.9.0",
 };
 function ensurePackage(identifier, version) {
   const pathname = join(packageRoot, identifier.slice(4).replaceAll("/", "__"));
@@ -181,7 +185,7 @@ function runPlan(packages, configRoot, options = {}) {
         ...process.env,
         PI_EXECUTABLE: fakePi,
         FAKE_PI_PACKAGES: `${listLines.join("\n")}\n`,
-        FAKE_PI_VERSION: options.piVersion || "pi 0.83.0",
+        FAKE_PI_VERSION: options.piVersion || "pi 0.84.2",
         FAKE_PI_MODELS: options.models,
       },
     },
@@ -206,13 +210,13 @@ assert.match(
   `stderr must report missing dependencies:\n${result.stderr}`,
 );
 const piGoalIndex = result.stderr.indexOf("npm:@narumitw/pi-goal");
-const rpivTodoIndex = result.stderr.indexOf("npm:@juicesharp/rpiv-todo");
+const piTasksIndex = result.stderr.indexOf("npm:@tintinweb/pi-tasks");
 assert.ok(
   piGoalIndex >= 0,
   `stderr must list the missing pi-goal package:\n${result.stderr}`,
 );
 assert.ok(
-  rpivTodoIndex > piGoalIndex,
+  piTasksIndex > piGoalIndex,
   `missing packages must use the fixed dependency order:\n${result.stderr}`,
 );
 assert.equal(
@@ -221,9 +225,9 @@ assert.equal(
   "pi-goal must be reported exactly once",
 );
 assert.equal(
-  result.stderr.match(/npm:@juicesharp\/rpiv-todo/g)?.length,
+  result.stderr.match(/npm:@tintinweb\/pi-tasks/g)?.length,
   1,
-  "rpiv-todo must be reported exactly once",
+  "pi-tasks must be reported exactly once",
 );
 assert.equal(
   existsSync(join(case1Root, "install-records")),
@@ -234,7 +238,7 @@ assert.equal(
 // (2a) Only pi-goal missing: only the actually missing package is reported.
 const case2aRoot = join(fixtureRoot, "case2a-missing-pi-goal");
 result = runPlan(
-  [...ORIGINAL_DEPENDENCIES, "npm:@juicesharp/rpiv-todo"],
+  [...ORIGINAL_DEPENDENCIES, "npm:@tintinweb/pi-tasks"],
   case2aRoot,
 );
 assert.notEqual(result.status, 0, "plan must fail when pi-goal is missing");
@@ -243,7 +247,7 @@ assert.ok(
   `stderr must list the missing pi-goal package:\n${result.stderr}`,
 );
 assert.ok(
-  !result.stderr.includes("npm:@juicesharp/rpiv-todo"),
+  !result.stderr.includes("npm:@tintinweb/pi-tasks"),
   `only the actually missing package may be listed:\n${result.stderr}`,
 );
 assert.equal(
@@ -252,16 +256,16 @@ assert.equal(
   noAuditCreated(case2aRoot),
 );
 
-// (2b) Only rpiv-todo missing: only the actually missing package is reported.
-const case2bRoot = join(fixtureRoot, "case2b-missing-rpiv-todo");
+// (2b) Only pi-tasks missing: only the actually missing package is reported.
+const case2bRoot = join(fixtureRoot, "case2b-missing-pi-tasks");
 result = runPlan(
   [...ORIGINAL_DEPENDENCIES, "npm:@narumitw/pi-goal"],
   case2bRoot,
 );
-assert.notEqual(result.status, 0, "plan must fail when rpiv-todo is missing");
+assert.notEqual(result.status, 0, "plan must fail when pi-tasks is missing");
 assert.ok(
-  result.stderr.includes("npm:@juicesharp/rpiv-todo"),
-  `stderr must list the missing rpiv-todo package:\n${result.stderr}`,
+  result.stderr.includes("npm:@tintinweb/pi-tasks"),
+  `stderr must list the missing pi-tasks package:\n${result.stderr}`,
 );
 assert.ok(
   !result.stderr.includes("npm:@narumitw/pi-goal"),
@@ -310,7 +314,7 @@ assert.equal(
 );
 assert.equal(
   plan.pi.minimum_version,
-  "0.80.6",
+  "0.84.0",
   "plan must record the enforced Pi minimum",
 );
 assert.deepEqual(
@@ -657,12 +661,12 @@ assert.match(
   `second apply must be refused:\n${result.stderr}`,
 );
 
-// (A) Pi below the enforced 0.80.6 minimum: plan must fail before any
+// (A) Pi below the enforced 0.84.0 minimum: plan must fail before any
 // configuration-root write. 0.9.0 exercises the numeric major/minor/patch
-// comparison (string ordering would wrongly accept it as above 0.80.6).
+// comparison (string ordering would wrongly accept it as above 0.84.0).
 const caseARoot = join(fixtureRoot, "caseA-pi-below-minimum");
 result = runPlan(FIXED_DEPENDENCIES, caseARoot, { piVersion: "0.9.0" });
-assert.notEqual(result.status, 0, "plan must fail when Pi is below 0.80.6");
+assert.notEqual(result.status, 0, "plan must fail when Pi is below 0.84.0");
 assert.match(
   result.stderr,
   /0\.9\.0/,
@@ -670,13 +674,13 @@ assert.match(
 );
 assert.match(
   result.stderr,
-  /0\.80\.6/,
+  /0\.84\.0/,
   `stderr must include the enforced minimum:\n${result.stderr}`,
 );
 assert.match(
   result.stderr,
-  /agent_settled/,
-  `stderr must explain the agent_settled reason:\n${result.stderr}`,
+  /pi-subagents/,
+  `stderr must explain the enforced-baseline reason:\n${result.stderr}`,
 );
 assert.equal(
   existsSync(join(caseARoot, "install-records")),
@@ -684,50 +688,50 @@ assert.equal(
   noAuditCreated(caseARoot),
 );
 
-// Boundary: exactly the 0.80.6 minimum must be accepted.
+// Boundary: exactly the 0.84.0 minimum must be accepted.
 const caseABoundaryRoot = join(fixtureRoot, "caseA-boundary-minimum");
 result = runPlan(FIXED_DEPENDENCIES, caseABoundaryRoot, {
-  piVersion: "0.80.6",
+  piVersion: "0.84.0",
 });
 assert.equal(
   result.status,
   0,
-  `plan must succeed when Pi is exactly 0.80.6:\n${result.stderr}`,
+  `plan must succeed when Pi is exactly 0.84.0:\n${result.stderr}`,
 );
 const boundaryPlanPath = result.stdout.trim().split(/\r?\n/)[0];
 assert.equal(
   JSON.parse(readFileSync(boundaryPlanPath, "utf8")).pi.version,
-  "0.80.6",
-  "boundary plan must record 0.80.6",
+  "0.84.0",
+  "boundary plan must record 0.84.0",
 );
 
-// (B) pi-subagents below the enforced 0.15.0 minimum: strict routing's
-// fallbackSubagent: "none" only exists from 0.15.0, so an older release
-// would silently fail open. Plan must fail with an actionable message and
-// no configuration-root write.
+// (B) pi-subagents below the enforced 0.19.0 minimum: 0.18.2 still answers
+// the protocol ping but predates the enforced task-dispatch baseline, and
+// releases below 0.18.2 lack RPC-spawn model-scope enforcement. Plan must
+// fail with an actionable message and no configuration-root write.
 const caseBRoot = join(fixtureRoot, "caseB-subagents-below-minimum");
 result = runPlan(FIXED_DEPENDENCIES, caseBRoot, {
-  versions: { "npm:@tintinweb/pi-subagents": "0.14.3" },
+  versions: { "npm:@tintinweb/pi-subagents": "0.18.2" },
 });
 assert.notEqual(
   result.status,
   0,
-  "plan must fail when pi-subagents is below 0.15.0",
+  "plan must fail when pi-subagents is below 0.19.0",
 );
 assert.match(
   result.stderr,
-  /0\.14\.3/,
+  /0\.18\.2/,
   `stderr must include the installed version:\n${result.stderr}`,
 );
 assert.match(
   result.stderr,
-  /0\.15\.0/,
+  /0\.19\.0/,
   `stderr must include the enforced minimum:\n${result.stderr}`,
 );
 assert.match(
   result.stderr,
-  /fallbackSubagent/,
-  `stderr must explain the fallbackSubagent reason:\n${result.stderr}`,
+  /task-dispatch/,
+  `stderr must explain the task-dispatch baseline reason:\n${result.stderr}`,
 );
 assert.match(
   result.stderr,
@@ -740,13 +744,46 @@ assert.equal(
   noAuditCreated(caseBRoot),
 );
 
+// (B2) pi-tasks below the enforced 0.9.0 minimum: the orchestrator's task
+// contract is written and tested against that release. Plan must fail with
+// an actionable message and no configuration-root write.
+const caseB2Root = join(fixtureRoot, "caseB2-tasks-below-minimum");
+result = runPlan(FIXED_DEPENDENCIES, caseB2Root, {
+  versions: { "npm:@tintinweb/pi-tasks": "0.8.9" },
+});
+assert.notEqual(
+  result.status,
+  0,
+  "plan must fail when pi-tasks is below 0.9.0",
+);
+assert.match(
+  result.stderr,
+  /0\.8\.9/,
+  `stderr must include the installed version:\n${result.stderr}`,
+);
+assert.match(
+  result.stderr,
+  /0\.9\.0/,
+  `stderr must include the enforced minimum:\n${result.stderr}`,
+);
+assert.match(
+  result.stderr,
+  /fail-closed/,
+  `stderr must state the fail-closed consequence:\n${result.stderr}`,
+);
+assert.equal(
+  existsSync(join(caseB2Root, "install-records")),
+  false,
+  noAuditCreated(caseB2Root),
+);
+
 // (T) validatePlan must reject tampered or missing new fields even when the
 // tampered bytes are re-hashed and re-submitted (acceptance criterion 4).
 const caseTRoot = join(fixtureRoot, "caseT-tampered-plan");
 function freshTamperCase() {
   const fresh = runPlan(FIXED_DEPENDENCIES, caseTRoot, {
     piVersion: "0.84.2",
-    versions: { "npm:@tintinweb/pi-subagents": "0.15.0" },
+    versions: { "npm:@tintinweb/pi-subagents": "0.19.0" },
   });
   assert.equal(
     fresh.status,
@@ -770,8 +807,8 @@ function applyTampered(planPath, from, to) {
 let tamperPlanPath = freshTamperCase();
 result = applyTampered(
   tamperPlanPath,
-  '"npm:@tintinweb/pi-subagents": "0.15.0"',
-  '"npm:@tintinweb/pi-subagents": "0.14.3"',
+  '"npm:@tintinweb/pi-subagents": "0.19.0"',
+  '"npm:@tintinweb/pi-subagents": "0.18.2"',
 );
 assert.notEqual(
   result.status,
@@ -780,7 +817,7 @@ assert.notEqual(
 );
 assert.match(
   result.stderr,
-  /below the required minimum 0\.15\.0/,
+  /below the required minimum 0\.19\.0/,
   `stderr must report the pi-subagents minimum:\n${result.stderr}`,
 );
 assert.equal(
@@ -791,8 +828,8 @@ assert.equal(
 tamperPlanPath = freshTamperCase();
 result = applyTampered(
   tamperPlanPath,
-  '"minimum_version": "0.80.6"',
-  '"minimum_version": "0.80.5"',
+  '"minimum_version": "0.84.0"',
+  '"minimum_version": "0.83.9"',
 );
 assert.notEqual(
   result.status,
@@ -807,7 +844,7 @@ assert.match(
 tamperPlanPath = freshTamperCase();
 result = applyTampered(
   tamperPlanPath,
-  '"npm:@tintinweb/pi-subagents": "0.15.0",\n',
+  '"npm:@tintinweb/pi-subagents": "0.19.0",\n',
   "",
 );
 assert.notEqual(
@@ -970,9 +1007,11 @@ const [driftPlanPath, driftSha] = result.stdout.trim().split(/\r?\n/);
 const driftedPackageRoot = join(fixtureRoot, "drifted-packages");
 const driftedList = ["User packages:"];
 for (const identifier of FIXED_DEPENDENCIES) {
+  // 0.20.0 stays above the enforced minimum so the drift check itself,
+  // not the version gate, is what refuses the apply.
   const version =
     identifier === "npm:@tintinweb/pi-subagents"
-      ? "0.16.0"
+      ? "0.20.0"
       : DEFAULT_PACKAGE_VERSIONS[identifier];
   const pathname = join(
     driftedPackageRoot,
@@ -1147,10 +1186,12 @@ assert.ok(
   "plan must record the provider/model pair",
 );
 
-// --- Documentation surface assertions (Task 3) ----------------------------
-// Static checks that the installation contract and both READMEs stay aligned
-// with the installer's fixed eight-dependency gate and the Goal policy.
-// Assertions are deliberately local phrases, not whole-paragraph locks.
+// --- Documentation and policy surface assertions -------------------------
+// Static checks that the installation contract, both READMEs, and both
+// orchestrator policies stay aligned with the installer's fixed
+// eight-dependency gate, the pi-tasks migration semantics, and the Goal
+// policy. Assertions are deliberately local phrases, not whole-paragraph
+// locks.
 const docs = {
   "INSTALL_AGENT.md": readFileSync(
     join(projectRoot, "INSTALL_AGENT.md"),
@@ -1178,6 +1219,52 @@ const orchestratorGoalPolicy = readFileSync(
   ),
   "utf8",
 );
+// Core-policy dispatch and acceptance principles: one dispatch entry per work
+// item — TaskExecute for delegations that need structured tracking, the
+// native Agent for simple delegations or capabilities the task tools do not
+// cover — downstream executable tasks gated on the coordinator's review, and
+// acceptance by deliverable-appropriate evidence rather than completion
+// notices, with late or duplicate notices never re-triggering dispatch.
+assert.match(
+  orchestratorPolicy,
+  /Prefer TaskExecute when several delegations need structured tracking/,
+  "core policy must prefer the task-dispatch entry for structured tracking",
+);
+assert.match(
+  orchestratorPolicy,
+  /capabilities the task tools do not cover, such as resume, worktree isolation, or inherit_context/,
+  "core policy must route uncovered capabilities to the native Agent",
+);
+assert.match(
+  orchestratorPolicy,
+  /never duplicate the same work across both/,
+  "core policy must forbid dispatching the same work through both entries",
+);
+assert.match(
+  orchestratorPolicy,
+  /create its executable task only after that check/,
+  "core policy must gate dependent executable tasks on the review or acceptance check",
+);
+assert.match(
+  orchestratorPolicy,
+  /Treat task completion as execution status, not acceptance/,
+  "core policy must not treat task completion as acceptance",
+);
+assert.match(
+  orchestratorPolicy,
+  /actual files and checks for implementation, sources and claim support for research/,
+  "core policy must verify deliverables against applicable evidence",
+);
+assert.match(
+  orchestratorPolicy,
+  /Ignore late or duplicate notices for results already handled/,
+  "core policy must expect late completion notices after a result read",
+);
+assert.match(
+  orchestratorPolicy,
+  /do not repeat dispatch or delivery/,
+  "core policy must forbid duplicate dispatch and duplicate delivery",
+);
 assert.match(
   orchestratorGoalPolicy,
   /only while the current session has an active \/?goal/i,
@@ -1191,29 +1278,79 @@ assert.ok(
   !/`state=` of `planned`/.test(orchestratorGoalPolicy),
   "policy must not pin a lane state enum that nothing consumes",
 );
-assert.match(
-  orchestratorGoalPolicy,
-  /Separate lanes with a pipe that has one space on each side/,
-  "policy must keep the single-line lane separator",
-);
-assert.match(
-  orchestratorGoalPolicy,
-  /separate fields inside a lane with a semicolon followed by one space/i,
-  "policy must keep the field separator",
-);
 assert.ok(
   !/fields by `; ?`/.test(orchestratorGoalPolicy),
   "lane separators must be described in prose so markdown autofix cannot strip their spaces",
 );
+// Wave checkpoint contract after the pi-tasks migration: exactly one current
+// checkpoint as a non-executable task carrying the goal id, member ids,
+// acceptance decisions, and evidence references; execution tasks per work
+// unit (never per specialist role); live status read from the tools rather
+// than hand-copied; and the retired todo-description lane-accounting format
+// entirely gone.
 assert.match(
   orchestratorGoalPolicy,
-  /does not echo `metadata`/,
-  "policy must keep lane records in description, not metadata",
+  /exactly one current Wave or stage checkpoint as a non-executable task without `agentType`/,
+  "goal policy must keep one non-executable Wave/stage checkpoint task",
 );
 assert.match(
   orchestratorGoalPolicy,
-  /Never block on a non-terminal lane with `get_subagent_result\(wait: true\)`/,
-  "policy must forbid blocking on a non-terminal background lane",
+  /record the current `goal_id`, member task IDs \(or Agent IDs for native dispatch\), acceptance decisions, and evidence references/,
+  "goal policy must pin the checkpoint's persisted content",
+);
+assert.match(
+  orchestratorGoalPolicy,
+  /Keep it open until you have accepted every required result/,
+  "goal policy must keep the checkpoint open until acceptance completes",
+);
+assert.match(
+  orchestratorGoalPolicy,
+  /per work unit when structured tracking is needed, not per specialist role/,
+  "goal policy must create execution tasks per work unit, not per role",
+);
+assert.match(
+  orchestratorGoalPolicy,
+  /do not copy it into the checkpoint/,
+  "goal policy must not hand-copy live status into the checkpoint",
+);
+assert.ok(
+  !/does not echo `metadata`/.test(orchestratorGoalPolicy),
+  "goal policy must drop the retired todo-description lane accounting",
+);
+assert.ok(
+  !/one line because that rendering collapses newlines/.test(
+    orchestratorGoalPolicy,
+  ),
+  "goal policy must drop the retired single-line lane record format",
+);
+assert.match(
+  orchestratorGoalPolicy,
+  /Never block on a non-terminal lane with `get_subagent_result\(wait: true\)` or `TaskOutput\(block: true\)`/,
+  "goal policy must forbid blocking on a non-terminal lane through either tool",
+);
+// Task completion stays execution status: the coordinator applies the core
+// acceptance rules before completing the checkpoint.
+assert.match(
+  orchestratorGoalPolicy,
+  /Apply the core acceptance rules before completing the checkpoint/,
+  "goal policy must apply core acceptance before completing the checkpoint",
+);
+assert.match(
+  orchestratorGoalPolicy,
+  /do not treat task `completed` as acceptance/,
+  "goal policy must not treat task completion as acceptance",
+);
+// Restored records and unresolved IDs are unknown, never success or proof
+// that execution stopped; evidence is reconciled before any re-dispatch.
+assert.match(
+  orchestratorGoalPolicy,
+  /Treat missing records and unresolved Agent IDs as unknown, not as success or proof that execution stopped/,
+  "goal policy must treat missing records and unknown IDs as unknown",
+);
+assert.match(
+  orchestratorGoalPolicy,
+  /Reconcile available results, relevant artifacts or sources, and live execution before rebuilding the checkpoint or deciding to re-dispatch/,
+  "goal policy must reconcile evidence before rebuilding or re-dispatching",
 );
 assert.match(
   orchestratorGoalPolicy,
@@ -1231,11 +1368,16 @@ assert.match(
   "policy must keep the 30-minute goal_wait fallback",
 );
 
-// All three documents name both new packages.
+// All three documents name both goal/task packages, and no retired rpiv
+// package name or optional peer survives anywhere.
 for (const [name, text] of docEntries) {
-  for (const pkg of ["@narumitw/pi-goal", "@juicesharp/rpiv-todo"]) {
+  for (const pkg of ["@narumitw/pi-goal", "@tintinweb/pi-tasks"]) {
     assert.ok(text.includes(pkg), `${name} must mention ${pkg}`);
   }
+  assert.ok(
+    !/rpiv-todo|rpiv-i18n/.test(text),
+    `${name} must not mention the retired rpiv packages`,
+  );
 }
 
 // Dependency count is eight, with no leftover "six dependencies" phrasing.
@@ -1273,8 +1415,8 @@ assert.ok(
   "INSTALL_AGENT.md fixed list must include npm:@narumitw/pi-goal",
 );
 assert.ok(
-  docs["INSTALL_AGENT.md"].includes("npm:@juicesharp/rpiv-todo"),
-  "INSTALL_AGENT.md fixed list must include npm:@juicesharp/rpiv-todo",
+  docs["INSTALL_AGENT.md"].includes("npm:@tintinweb/pi-tasks"),
+  "INSTALL_AGENT.md fixed list must include npm:@tintinweb/pi-tasks",
 );
 // Installer contract preserved: never installs/removes packages; missing
 // dependencies surface only the fixed pi install command plus separate approval.
@@ -1328,17 +1470,17 @@ for (const [name, text] of docEntries) {
   );
 }
 
-// Default mode still gains rpiv-todo's native tools/guidance; no
+// Default mode still gains pi-tasks' native task tools/guidance; no
 // "default mode completely unchanged" claim remains.
 assert.match(
   docs["README.md"],
-  /all modes/,
-  "README.md must say all modes gain rpiv-todo",
+  /all modes gain its native task tools/,
+  "README.md must say all modes gain pi-tasks' native task tools",
 );
 assert.match(
   docs["README.zh-CN.md"],
-  /所有模式/,
-  "README.zh-CN.md must say all modes gain rpiv-todo",
+  /所有模式都会获得其原生任务工具/,
+  "README.zh-CN.md must say all modes gain pi-tasks' native task tools",
 );
 for (const [name, text] of docEntries) {
   assert.ok(
@@ -1374,12 +1516,13 @@ assert.match(
   "README.zh-CN.md must state lanes/max_turns are not a budget substitute",
 );
 
-// Pi floor/acceptance versions and the optional rpiv-i18n peer in both READMEs.
+// Pi floor/acceptance versions in both READMEs; the retired optional
+// rpiv-i18n peer paragraph is already covered by the absence check above.
 for (const [name, text] of [
   ["README.md", docs["README.md"]],
   ["README.zh-CN.md", docs["README.zh-CN.md"]],
 ]) {
-  assert.match(text, />= 0\.80\.6/, `${name} must require Pi >= 0.80.6`);
+  assert.match(text, />= 0\.84\.0/, `${name} must require Pi >= 0.84.0`);
   assert.match(
     text,
     /0\.84\.2/,
@@ -1387,13 +1530,8 @@ for (const [name, text] of [
   );
   assert.match(
     text,
-    /rpiv-i18n/,
-    `${name} must explain the optional rpiv-i18n peer`,
-  );
-  assert.match(
-    text,
-    /agent_settled/,
-    `${name} must explain the agent_settled requirement`,
+    /pi-subagents/,
+    `${name} must explain the enforced Pi floor reason`,
   );
 }
 
@@ -1404,8 +1542,13 @@ for (const [name, text] of [
 ]) {
   assert.match(
     text,
-    />= 0\.15\.0/,
-    `${name} must require pi-subagents >= 0.15.0`,
+    />= 0\.19\.0/,
+    `${name} must require pi-subagents >= 0.19.0`,
+  );
+  assert.match(
+    text,
+    />= 0\.9\.0/,
+    `${name} must require pi-tasks >= 0.9.0`,
   );
   assert.match(
     text,
@@ -1420,13 +1563,43 @@ assert.match(
 );
 assert.match(
   docs["INSTALL_AGENT.md"],
-  />= 0\.15\.0/,
+  />= 0\.19\.0/,
   "INSTALL_AGENT.md must state the pi-subagents minimum",
 );
 assert.match(
   docs["INSTALL_AGENT.md"],
-  />= 0\.80\.6/,
+  />= 0\.9\.0/,
+  "INSTALL_AGENT.md must state the pi-tasks minimum",
+);
+assert.match(
+  docs["INSTALL_AGENT.md"],
+  />= 0\.84\.0/,
   "INSTALL_AGENT.md must state the Pi minimum",
+);
+
+// pi-tasks configuration stays entirely with the user: every document names
+// tasks-config.json and states that this project never creates or modifies it.
+for (const [name, text] of docEntries) {
+  assert.match(
+    text,
+    /tasks-config\.json/,
+    `${name} must name tasks-config.json`,
+  );
+}
+assert.match(
+  docs["README.md"],
+  /never creates or modifies it/,
+  "README.md must state tasks-config.json is never created or modified",
+);
+assert.match(
+  docs["README.zh-CN.md"],
+  /从不创建或修改/,
+  "README.zh-CN.md must state tasks-config.json is never created or modified",
+);
+assert.match(
+  docs["INSTALL_AGENT.md"],
+  /never creates or modifies it/,
+  "INSTALL_AGENT.md must state tasks-config.json is never created or modified",
 );
 
 // No /ultragoal or UltraGoal Mode usage instructions in any document.
@@ -1454,8 +1627,13 @@ for (const [name, text] of [
   );
   assert.match(
     text,
-    /@juicesharp\/rpiv-todo`\s*\|\s*2\.6\.0\s*\|/,
-    `${name} table must list rpiv-todo 2.6.0`,
+    /@tintinweb\/pi-tasks`\s*\|\s*0\.9\.0\s*\|/,
+    `${name} table must list pi-tasks 0.9.0`,
+  );
+  assert.match(
+    text,
+    /@tintinweb\/pi-subagents`\s*\|\s*0\.19\.0\s*\|/,
+    `${name} table must list pi-subagents 0.19.0`,
   );
   assert.match(
     text,
@@ -1464,8 +1642,8 @@ for (const [name, text] of [
   );
   assert.match(
     text,
-    /juicesharp\/rpiv-mono/,
-    `${name} table must reference the rpiv-todo repository`,
+    /github\.com\/tintinweb\/pi-tasks/,
+    `${name} table must reference the pi-tasks repository`,
   );
 }
 
