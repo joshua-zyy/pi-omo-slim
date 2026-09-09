@@ -374,16 +374,19 @@ export function registerCouncil(
 			"Convene a multi-councillor review: /council <question> | /council doctor",
 		handler: async (args, ctx) => {
 			const action = args.trim();
-			if (action === "doctor") {
-				doctor(ctx);
+			if (action === "") {
+				if (!ctx.hasUI) {
+					throw new Error(
+						"Council question input requires an interactive session; use /council <question> in print or JSON mode.",
+					);
+				}
+				const question = (await ctx.ui.editor("Council question", ""))?.trim();
+				if (!question) return;
+				convene(question, ctx);
 				return;
 			}
-			if (action === "") {
-				notify(
-					ctx,
-					"Usage: /council <question> | /council doctor",
-					"warning",
-				);
+			if (action === "doctor") {
+				doctor(ctx);
 				return;
 			}
 			convene(action, ctx);

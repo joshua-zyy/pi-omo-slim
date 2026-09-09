@@ -49,6 +49,7 @@ const cleanTemplate = `---\ndescription: "fixture"\ntools: read\nrun_in_backgrou
 function createHarness(options = {}) {
 	const sent = [];
 	const notifications = [];
+	const editorCalls = [];
 	const commands = new Map();
 	const tools = options.tools ?? [{ name: "read" }, { name: "Agent" }];
 	const pi = {
@@ -63,11 +64,16 @@ function createHarness(options = {}) {
 		},
 	};
 	const ctx = {
-		hasUI: true,
+		hasUI: options.hasUI ?? true,
+		mode: options.mode ?? "tui",
 		ui: {
 			notify: (message, level = "info") =>
 				notifications.push({ message, level }),
 			setStatus: () => {},
+			editor: async (title, initialValue) => {
+				editorCalls.push({ title, initialValue });
+				return options.editorResult;
+			},
 		},
 		modelRegistry:
 			options.modelRegistry ?? {
@@ -87,6 +93,7 @@ function createHarness(options = {}) {
 	return {
 		sent,
 		notifications,
+		editorCalls,
 		command: (args) => commands.get("council").handler(args, ctx),
 	};
 }
@@ -327,16 +334,53 @@ test("council.json is re-read on every invocation", async () => {
 	assert.ok(!second.includes("- alpha"));
 });
 
-test("empty arguments show usage without injecting", async () => {
+test("empty arguments open the Council question editor and convene the result", async () => {
 	writeConfig(VALID_ROSTER);
-	const harness = createHarness();
+	writeTemplate(cleanTemplate);
+	const harness = createHarness({ editorResult: "  Should we use a job queue?  " });
 
 	await harness.command("   ");
 
-	assert.equal(harness.sent.length, 0);
-	assert.deepEqual(harness.notifications, [
-		{ message: "Usage: /council <question> | /council doctor", level: "warning" },
+	assert.deepEqual(harness.editorCalls, [
+		{ title: "Council question", initialValue: "" },
 	]);
+	assert.equal(harness.sent.length, 1);
+	assert.ok(harness.sent[0].content.includes("Should we use a job queue?"));
+	assert.equal(harness.notifications.at(-1).level, "info");
+});
+
+test("cancelling the empty-argument editor does not convene", async () => {
+	writeConfig(VALID_ROSTER);
+	const harness = createHarness({ editorResult: undefined });
+
+	await harness.command("");
+
+	assert.deepEqual(harness.editorCalls, [
+		{ title: "Council question", initialValue: "" },
+	]);
+	assert.equal(harness.sent.length, 0);
+	assert.equal(harness.notifications.length, 0);
+});
+
+test("a blank question from the editor does not convene", async () => {
+	writeConfig(VALID_ROSTER);
+	const harness = createHarness({ editorResult: " \n\t " });
+
+	await harness.command("");
+
+	assert.equal(harness.sent.length, 0);
+	assert.equal(harness.notifications.length, 0);
+});
+
+test("empty arguments in a headless session reject the interactive-only input", async () => {
+	writeConfig(VALID_ROSTER);
+	const harness = createHarness({ hasUI: false, mode: "print" });
+
+	await assert.rejects(
+		harness.command(""),
+		/Council question input requires an interactive session/,
+	);
+	assert.equal(harness.sent.length, 0);
 });
 
 test("only an exact doctor match enters diagnostics", async () => {
