@@ -1909,6 +1909,7 @@ for (const [name, text, boundaryPhrases] of [
     [
       [/not independent verification/, "same-model agreement caveat"],
       [/bounded by your session model/, "main-session synthesizer limit"],
+      [/does not convene/, "print-mode boundary"],
     ],
   ],
   [
@@ -1917,6 +1918,7 @@ for (const [name, text, boundaryPhrases] of [
     [
       [/不构成独立验证/, "same-model agreement caveat"],
       [/受你的会话模型限制/, "main-session synthesizer limit"],
+      [/不会召集/, "print-mode boundary"],
     ],
   ],
 ]) {

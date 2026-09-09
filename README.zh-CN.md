@@ -127,6 +127,7 @@ node scripts/install.mjs apply --plan <absolute-plan.json> --sha256 <approved-pl
 - 综合者就是主会话：裁决质量受你的会话模型限制。需要更强的裁决能力时，请切换会话模型。
 - 报告只存在于对话中；会话压缩不保证完整保留。需要留存时请要求综合者写入文件。
 - `/council doctor` 只检查全局模板与全局 `council.json`；项目级 `.pi/agents/councillor.md` 覆盖（Pi 原生机制）不在检查范围，模型注册表存在也不保证派发成功。
+- `/council` 需要交互式会话。print 模式（`pi -p`）下命令会执行但不会召集议会——注入的指令没有可依附的交互回合。
 
 ## Goal 集成
 

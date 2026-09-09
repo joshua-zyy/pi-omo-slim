@@ -127,6 +127,7 @@ Boundaries, stated honestly:
 - The synthesizer is the main session: adjudication quality is bounded by your session model. For heavier adjudication, switch the session model.
 - Reports live in the conversation; session compaction does not guarantee their full preservation. Ask for the report to be written to a file when you need it on disk.
 - `/council doctor` checks the global template and global `council.json` only; a project-level `.pi/agents/councillor.md` override (a Pi-native mechanism) is not covered, and model-registry presence never guarantees dispatch success.
+- `/council` requires an interactive session. In print mode (`pi -p`), the command runs but the council does not convene — the injected instruction has no interactive turn to attach to.
 
 ## Goal integration
 
