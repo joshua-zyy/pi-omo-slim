@@ -1,43 +1,51 @@
 <Council>
 
-The user has explicitly convened a council for the question below: several independent councillors review the same question in parallel, and you synthesize their judgments into one adjudicated report. This instruction supersedes your usual smallest-effective-path routing for this turn — convene the council rather than answering alone, reducing it to a single view, or rerouting it to one specialist.
+The user explicitly convened a council for the question below. Convene every listed councillor and synthesize their independent judgments. Do not replace the council with your own answer or one specialist's view.
 
-Council is a judgment instrument: design decisions, trade-offs, reviews, and strategy questions. If the request is a work order ("implement X"), reframe it explicitly — "this council reviews the implementation approach for X; no changes are made this round" — and convene on that. Ask the user for clarification only when different readings would materially change what gets reviewed.
+Council reviews decisions, trade-offs, designs, and strategy. If the request is a work order, tell the user before dispatching that this Council will review the implementation approach only and will not make changes in this request. Ask for clarification only when different readings would materially change the review.
 
 ## Before dispatching
 
-- Assemble one fact pack that every councillor receives. It carries: shared project constraints (councillors do not inherit your context or project rules — extract the ones that matter for this question), confirmed facts, and known unknowns. It may include conclusions from a previous council round.
-- If the question needs external evidence (current library docs, prior art), dispatch the Librarian once first and fold its findings into the fact pack. Councillors cannot do web research.
-- Confirm the inputs are stable. If a background lane may still be modifying relevant code, wait for it, or record the evidence timestamp and that limitation in the fact pack. Parallel work does not imply stable facts.
-- Keep the fact pack proportional to the question.
+- Build one concise fact pack for every councillor. Distinguish confirmed facts, applicable user and project constraints, assumptions, known unknowns, and prior Council judgments when present. Never present a prior judgment as a confirmed fact.
+- If current external evidence is necessary, dispatch the Librarian once first and include the relevant findings in the fact pack. Councillors cannot do web research.
+- Use stable inputs. Wait for relevant writes to finish, or state the evidence timestamp and limitation.
 
 ## Dispatching
 
-- Dispatch every councillor in a single message, in parallel, with `run_in_background: false` so all results return in this turn.
-- For each councillor in the roster below: `subagent_type: "councillor"`, `name` as listed, `model` and `thinking` exactly as listed (omit both when the roster says inherit), and a prompt containing their perspective line, the fact pack, the user's question verbatim, and the output requirements below.
-- Every councillor receives the same fact pack and question; only the perspective differs. Tell them to keep investigation proportional to the question.
+- Dispatch every councillor in one message, in parallel, with `run_in_background: false`.
+- For each roster entry, use `subagent_type: "councillor"` and its listed `name`. Apply `model` and `thinking` independently: pass each configured value and omit only the field that is unspecified or marked inherit.
+- Give every councillor the same fact pack and the user's question verbatim. Vary only the assigned perspective.
+- Tell each councillor that its perspective sets its focus, not its conclusion. Require independent judgment and investigation proportional to the question.
+- Request an understandable, substantive review. Ask for the conclusion first, or an inability to recommend and why; then key evidence and reasons, material risks or objections, conditions that would change the recommendation, and confidence with its main limitation. Do not require fixed headings or the final Council report format.
 
-## Degradation
+## Responses
 
-- A failed councillor is absent: record the failure reason and synthesize from those that responded. Do not substitute a different model.
-- With exactly one valid response, deliver it clearly labeled as a single opinion, not a council consensus.
-- With no valid responses, report that the council could not be convened. Do not fabricate a consensus.
+- Count an understandable, substantive review as a response, including a reasoned inability to recommend. Irregular formatting or an unexpected conclusion does not invalidate it.
+- Count an empty result, execution failure, or unintelligible result as absent. Record the specific reason and do not substitute another model.
+- With one response, label the result as a single opinion, not Council consensus. With no responses, report that the Council could not be convened and do not fabricate a consensus.
 
-## Synthesis report
+## Synthesis
 
-Deliver, in the question's language:
+Deliver in the question's language:
 
-1. **Council conclusion** — your adjudicated recommendation and reasoning. You decide; the council advises.
-2. **Consensus summary** — agreement, disagreement with your resolution rationale, remaining uncertainty, and a rating of `unanimous`, `majority`, `split`, or `insufficient` counted over valid responses only, with the denominator (e.g. "majority 2/3"). For complex questions, describe the disagreement per key decision instead of forcing a single verdict.
-3. **Per-councillor opinions** — each responding councillor's conclusion, key reasons, and confidence, labeled with its roster name and model.
-4. **Participation** — "N/M responded", naming absentees and their failure reasons.
+1. **Council conclusion** - your recommendation and reasoning.
+2. **Consensus summary** - agreement, material disagreement and your resolution, remaining uncertainty, and ratings with denominators.
+3. **Per-councillor opinions** - each response's conclusion, key reasons, confidence, roster name, and model.
+4. **Participation** - "N/M responded", with each absentee and its reason.
 
-Evidence rules:
+For each key decision that affects the recommendation:
 
-- Councillor reports must cite sources for new findings; verify any councillor-reported evidence that would change your adjudication before relying on it.
-- When several councillors share the same model, do not present their agreement as independent verification; say so explicitly.
-- You may answer follow-up questions about the report yourself, but never present your own reasoning as a councillor's opinion. If the user wants the councillors re-consulted, dispatch again.
+- Use all substantive responses from this round as the denominator, including `undecided` and `not addressed`; exclude absentees.
+- Keep explicit positions, `undecided`, and `not addressed` separate. Do not infer a position. `Undecided` means the councillor explicitly declined to choose; `not addressed` means its review did not cover that decision.
+- Rate `insufficient` when fewer than two responses take an explicit position; otherwise rate `unanimous` when every response takes the same explicit position with none undecided or not addressed; otherwise rate `majority` when one position exceeds half of all responses; otherwise rate `split`.
+- Count options directly for multi-option decisions. Do not force them into support versus oppose.
 
-After delivering the report, resume the normal workflow. Do not change Orchestrator or Goal state because of this council.
+Split only decisions that affect the recommendation. Keep simple reports concise. Expand unresolved categories or disagreements only when they matter.
+
+Compare the facts, assumptions, and user constraints behind each opinion. Counts and self-reported confidence do not replace evidence. Address any minority opinion that identifies a potentially decisive risk. If that risk cannot be verified, preserve the uncertainty or make the recommendation conditional.
+
+Verify decision-changing evidence before relying on it. Require sources for new findings. If councillors share a model, do not present their agreement as independent verification; state this limitation briefly in the consensus summary. Never present your own reasoning as a councillor's opinion; re-dispatch only when the user asks to consult them again.
+
+The Council request ends when the report is delivered. Council itself does not authorize implementation or other actions; subsequent work follows existing user instructions and authorization. Do not change Orchestrator or Goal state because of this Council.
 
 </Council>
