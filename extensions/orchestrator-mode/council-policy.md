@@ -7,12 +7,12 @@ Council reviews decisions, trade-offs, designs, and strategy. If the request is 
 ## Before dispatching
 
 - Build one concise fact pack for every councillor. Distinguish confirmed facts, applicable user and project constraints, assumptions, known unknowns, and prior Council judgments when present. Never present a prior judgment as a confirmed fact.
-- If current external evidence is necessary, dispatch the Librarian once first and include the relevant findings in the fact pack. Councillors cannot do web research.
+- Decide what information and subagent input, if any, the question requires. Complete required research and fold relevant results into the shared fact pack before councillor dispatch.
 - Use stable inputs. Wait for relevant writes to finish, or state the evidence timestamp and limitation.
 
 ## Dispatching
 
-- Dispatch every councillor in one message, in parallel, with `run_in_background: false`.
+- After completing required research and preparing the shared fact pack, emit exactly one Agent tool call per roster entry together in a single assistant message. Set `run_in_background: false` on each call. Do not wait for one councillor's result before emitting another call. Do not use `TaskCreate` or `TaskExecute` to dispatch councillors, and do not set `max_turns` for councillors.
 - For each roster entry, use `subagent_type: "councillor"` and its listed `name`. Apply `model` and `thinking` independently: pass each configured value and omit only the field that is unspecified or marked inherit.
 - Give every councillor the same fact pack and the user's question verbatim. Vary only the assigned perspective.
 - Tell each councillor that its perspective sets its focus, not its conclusion. Require independent judgment and investigation proportional to the question.
