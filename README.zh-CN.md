@@ -15,7 +15,8 @@
 - **Oracle** — 架构、调试策略、评审与简化；
 - **Designer** — UI/UX 设计、评审与实现；
 - **Fixer** — 有界的非视觉实现；
-- **Verifier** — 对已完成实现工作的独立评审与有界验证（通常是 Fixer 的产出）。
+- **Verifier** — 对已完成实现工作的独立评审与有界验证（通常是 Fixer 的产出）；
+- **Council** — 手动调用的多议员共识评审，用于高价值判断题（`/council`），把 OMO-slim 的 council 概念适配到 Pi 的 subagent API。
 
 本项目是一个配置包。它不 fork Pi、`pi-subagents` 或 OMO-slim，而是把 OMO-slim 的角色边界与编排方法适配到 Pi 实际提供的扩展与子 Agent API 之上。
 
@@ -90,6 +91,43 @@ node scripts/install.mjs apply --plan <absolute-plan.json> --sha256 <approved-pl
 
 生效状态的优先级为：当前会话分支中最近一次显式状态，其次 `defaultEnabled`，最后 `false`。因此，当 Pi 打开新会话或切换到未记录模式状态的会话时，`defaultEnabled: true` 会启用该模式；而曾执行过 `/orchestrator on` 或 `/orchestrator off` 的会话分支则保留其显式状态。
 
+## Council
+
+`/council` 是手动调用的共识评审，用于高价值的判断题——架构选择、方案取舍、评审。它刻意是本套件中最昂贵的路径，永远不会被自动触发：必须由你输入命令。
+
+```text
+/council 这次迁移选 job queue 还是 outbox 模式？
+/council doctor
+```
+
+命令读取 `<config-root>/council.json` 中的名单（每次调用都重新读取，改配置无需 reload），注入一条 council 指令。主会话作为综合者：组装一份共享事实包，前台并行派发全部议员，然后裁决出一份报告：
+
+1. **Council 结论** —— 综合者裁决后的推荐（council 提供建议，裁决权在综合者）；
+2. **共识摘要** —— 一致点、分歧点及裁决理由、剩余不确定性，以及 `unanimous` / `majority` / `split` / `insufficient` 共识度评级（仅按有效回应计数，并注明分母）；
+3. **各议员意见** —— 每位有效议员的结论、关键理由与置信度，标注名单名与模型；
+4. **参与情况** —— `N/M responded`，注明缺席者与失败原因。
+
+名单每一项包含 `name`（字母、数字、`_`、`-`）、可选 `model`（留空或缺省即继承父会话模型）、可选 `thinking` 级别、可选视角 `prompt`：
+
+```json
+{
+  "councillors": [
+    { "name": "skeptic", "model": "", "prompt": "Examine failure modes, edge cases, and risks." },
+    { "name": "architect", "model": "", "prompt": "Examine maintainability, boundaries, feasibility, migration path, and long-term cost." },
+    { "name": "minimalist", "model": "", "prompt": "Compare against the smallest designs that still meet the requirement." }
+  ]
+}
+```
+
+如实声明的边界：
+
+- 安装的 `agents/councillor.md` 模板永不固定 `model` 或 `thinking`：pi-subagents 以 agent 文件 frontmatter 优先于派发参数，因此 `council.json` 是逐议员模型的唯一来源。自定义 keep/replace 模板违反此约束或强制后台派发时，`/council doctor` 会警告。
+- 默认名单为三个同模型议员。同模型议员之间的一致意见不构成独立验证；综合者必须明确说明这一点。
+- 降级如实：失败议员记为缺席（不自动换模型）；仅一份有效回应时标注为“单份意见”而非共识；零有效回应时报告召集失败——不制造共识。
+- 综合者就是主会话：裁决质量受你的会话模型限制。需要更强的裁决能力时，请切换会话模型。
+- 报告只存在于对话中；会话压缩不保证完整保留。需要留存时请要求综合者写入文件。
+- `/council doctor` 只检查全局模板与全局 `council.json`；项目级 `.pi/agents/councillor.md` 覆盖（Pi 原生机制）不在检查范围，模型注册表存在也不保证派发成功。
+
 ## Goal 集成
 
 `@tintinweb/pi-tasks` 是固定依赖，安装后所有模式都会获得其原生任务工具与默认 guidance。其配置文件 `tasks-config.json` 完全由用户自行管理：本项目从不创建或修改该文件，也不依赖或改动 `autoCascade`（上游默认关闭）等选项。
@@ -119,9 +157,9 @@ Designer 与 Fixer 可以写文件并运行 shell 命令。Oracle 与 Verifier �
 ## 项目结构
 
 ```text
-agents/                         六个 pi-subagents Agent 定义
-config/                         安装配置模板
-extensions/orchestrator-mode/   模式命令、状态处理与策略
+agents/                         七个 pi-subagents Agent 定义（六个专家 + councillor）
+config/                         安装配置模板（含默认 council.json 名单）
+extensions/orchestrator-mode/   模式与 council 命令、状态处理与策略
 scripts/install.mjs             确定性的 plan/apply/verify/rollback 安装器
 INSTALL_AGENT.md                Pi Agent 的安装流程
 ```

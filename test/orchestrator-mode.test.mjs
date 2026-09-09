@@ -19,6 +19,7 @@ const AGENT_TOOLS = {
   oracle: "read, bash, ext:pi-lens/alpha, ext:pi-fff/beta",
   designer: "ext:pi-lens/alpha",
   fixer: "ext:pi-lens/alpha",
+  councillor: "read",
 };
 for (const [role, tools] of Object.entries(AGENT_TOOLS)) {
   writeFileSync(
@@ -84,6 +85,7 @@ function createHarness(initialBranch = [], tools = ["alpha", "beta"]) {
     context,
     notifications,
     command: (args) => commands.get("orchestrator").handler(args, context),
+    hasCommand: (name) => commands.has(name),
     beforeAgentStart: (systemPrompt = "BASE") =>
       handlers.get("before_agent_start")({ systemPrompt }, context),
     start: () => handlers.get("session_start")({}, context),
@@ -194,7 +196,7 @@ test("doctor reports policy state, defaultEnabled source, and the audit", async 
   assert.match(report, /^core policy: loaded, \d+ chars$/m);
   assert.match(report, /^goal policy: loaded, \d+ chars$/m);
   assert.match(report, /^defaultEnabled: false \(orchestrator-mode\.json absent\)$/m);
-  assert.match(report, /^agent files: 5\/6 readable in .+ — unchecked: verifier$/m);
+  assert.match(report, /^agent files: 6\/7 readable in .+ — unchecked: verifier$/m);
   assert.match(
     report,
     /^ext tool references: 6 across 2 unique names — MISSING beta \(Explore, oracle\)$/m,
@@ -222,4 +224,11 @@ test("an unknown subcommand lists doctor in its usage line", async () => {
   assert.deepEqual(harness.notifications, [
     { message: "Usage: /orchestrator [on|off|status|doctor]", level: "warning" },
   ]);
+});
+
+test("the /council command is registered alongside /orchestrator", async () => {
+  const harness = createHarness();
+
+  assert.ok(harness.hasCommand("council"));
+  assert.ok(harness.hasCommand("orchestrator"));
 });

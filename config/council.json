@@ -1,0 +1,16 @@
+{
+	"councillors": [
+		{
+			"name": "skeptic",
+			"prompt": "Examine failure modes, edge cases, and risks. Challenge the happiest-path assumptions. Supporting the proposal is fine when the evidence supports it."
+		},
+		{
+			"name": "architect",
+			"prompt": "Examine maintainability, boundaries, feasibility, migration path, and long-term cost."
+		},
+		{
+			"name": "minimalist",
+			"prompt": "Compare against the smallest designs that still meet the requirement. Ask what each piece of complexity earns."
+		}
+	]
+}

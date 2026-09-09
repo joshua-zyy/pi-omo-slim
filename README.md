@@ -15,7 +15,8 @@ The Orchestrator and specialist prompts in this repository are living documents:
 - **Oracle** — architecture, debugging strategy, review, and simplification;
 - **Designer** — UI/UX design, review, and implementation;
 - **Fixer** — bounded, non-visual implementation;
-- **Verifier** — independent review and bounded validation of completed implementation work (typically Fixer output).
+- **Verifier** — independent review and bounded validation of completed implementation work (typically Fixer output);
+- **Council** — manually invoked multi-councillor consensus review for high-stakes judgment questions (`/council`), adapting OMO-slim's council concept to Pi's subagent API.
 
 This project is a configuration bundle. It does not fork Pi, `pi-subagents`, or OMO-slim. It adapts OMO-slim's role boundaries and orchestration approach to the extension and subagent APIs that Pi actually provides.
 
@@ -90,6 +91,43 @@ The optional global configuration file is `<config-root>/orchestrator-mode.json`
 
 The effective state priority is: the latest explicit state in the current session branch, then `defaultEnabled`, then `false`. Consequently, `defaultEnabled: true` enables the mode when Pi opens a new session or switches to a session with no recorded mode state. A session branch that previously ran `/orchestrator on` or `/orchestrator off` retains that explicit state.
 
+## Council
+
+`/council` is a manually invoked consensus review for high-stakes judgment questions — architecture choices, trade-offs, reviews. It is deliberately the most expensive path in this setup and is never triggered automatically: you type the command.
+
+```text
+/council Should we use a job queue or an outbox pattern for this migration?
+/council doctor
+```
+
+The command reads the roster from `<config-root>/council.json` (re-read on every invocation, so edits take effect without a reload) and injects a council instruction. The session agent acts as the synthesizer: it assembles one shared fact pack, dispatches every councillor in parallel in the foreground, and adjudicates a single report:
+
+1. **Council conclusion** — the synthesizer's adjudicated recommendation (the council advises; the synthesizer decides);
+2. **Consensus summary** — agreement, disagreement with resolution rationale, remaining uncertainty, and a rating of `unanimous` / `majority` / `split` / `insufficient` counted over valid responses only, with the denominator;
+3. **Per-councillor opinions** — each responding councillor's conclusion, key reasons, and confidence, labeled with roster name and model;
+4. **Participation** — `N/M responded`, naming absentees and their failure reasons.
+
+Each roster entry has `name` (letters, digits, `_`, `-`), an optional `model` (empty or omitted inherits the parent session model), an optional `thinking` level, and an optional perspective `prompt`:
+
+```json
+{
+  "councillors": [
+    { "name": "skeptic", "model": "", "prompt": "Examine failure modes, edge cases, and risks." },
+    { "name": "architect", "model": "", "prompt": "Examine maintainability, boundaries, feasibility, migration path, and long-term cost." },
+    { "name": "minimalist", "model": "", "prompt": "Compare against the smallest designs that still meet the requirement." }
+  ]
+}
+```
+
+Boundaries, stated honestly:
+
+- The installed `agents/councillor.md` template never pins `model` or `thinking`: pi-subagents resolves agent-file frontmatter over per-dispatch parameters, so `council.json` is the sole per-councillor model source. `/council doctor` warns when a custom kept/replaced template violates this, or forces background dispatch.
+- The default roster ships three same-model councillors. Agreement between councillors sharing one model is not independent verification; the synthesizer must say so explicitly.
+- Degradation is honest: a failed councillor is recorded as absent (no model substitution), a single valid response is labeled a single opinion rather than a consensus, and zero valid responses report a failed convening — no fabricated consensus.
+- The synthesizer is the main session: adjudication quality is bounded by your session model. For heavier adjudication, switch the session model.
+- Reports live in the conversation; session compaction does not guarantee their full preservation. Ask for the report to be written to a file when you need it on disk.
+- `/council doctor` checks the global template and global `council.json` only; a project-level `.pi/agents/councillor.md` override (a Pi-native mechanism) is not covered, and model-registry presence never guarantees dispatch success.
+
 ## Goal integration
 
 `@tintinweb/pi-tasks` is a fixed dependency, so after installation all modes gain its native task tools and default guidance. Its configuration file `tasks-config.json` is entirely user-managed: this project never creates or modifies it, and it neither relies on nor changes options such as `autoCascade` (upstream default: off).
@@ -119,9 +157,9 @@ Designer and Fixer can write files and run shell commands. Oracle and Verifier h
 ## Project layout
 
 ```text
-agents/                         Six pi-subagents Agent definitions
-config/                         Installation configuration templates
-extensions/orchestrator-mode/  Mode commands, state handling, and policy
+agents/                         Seven pi-subagents Agent definitions (six specialists + councillor)
+config/                         Installation configuration templates (incl. the default council.json roster)
+extensions/orchestrator-mode/  Mode and council commands, state handling, and policies
 scripts/install.mjs             Deterministic plan/apply/verify/rollback installer
 INSTALL_AGENT.md                Installation procedure for a Pi Agent
 ```

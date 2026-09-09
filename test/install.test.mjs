@@ -15,7 +15,7 @@ import { dirname, join, resolve } from "node:path";
 // Cross-platform local test for scripts/install.mjs's fixed dependency gate,
 // the enforced Pi (>= 0.84.0), pi-subagents (>= 0.19.0), and pi-tasks
 // (>= 0.9.0) version minimums,
-// the plan schema_version 2 contract, the documentation and policy surface
+// the plan schema_version 3 contract, the documentation and policy surface
 // (INSTALL_AGENT.md, README.md, README.zh-CN.md, both orchestrator policies)
 // including the pi-tasks migration semantics — one dispatch entry per work
 // item, acceptance through actual verification without duplicate dispatch or
@@ -98,10 +98,14 @@ const TARGET_IDS = [
   "agents/designer.md",
   "agents/fixer.md",
   "agents/verifier.md",
+  "agents/councillor.md",
   "extensions/orchestrator-mode/index.ts",
   "extensions/orchestrator-mode/orchestrator-policy.md",
   "extensions/orchestrator-mode/orchestrator-goal-policy.md",
+  "extensions/orchestrator-mode/council.ts",
+  "extensions/orchestrator-mode/council-policy.md",
   "orchestrator-mode.json",
+  "council.json",
   "subagents.json",
   "settings.json",
 ];
@@ -114,6 +118,7 @@ const ROLES = [
   "fixer",
   "verifier",
 ];
+const COUNCILLOR = "councillor";
 // --- Fixture packages ------------------------------------------------------
 // Every listed package gets a real directory with a package.json carrying a
 // `version`, so the installer's `<path>/package.json` version read is
@@ -147,12 +152,15 @@ writeFileSync(
     {
       routing: "strict",
       orchestratorDefaultEnabled: false,
-      agents: Object.fromEntries(
-        ROLES.map((role) => [
-          role,
-          { action: "install", model: "inherit", thinking: "inherit" },
-        ]),
-      ),
+      agents: {
+        ...Object.fromEntries(
+          ROLES.map((role) => [
+            role,
+            { action: "install", model: "inherit", thinking: "inherit" },
+          ]),
+        ),
+        [COUNCILLOR]: { action: "install" },
+      },
     },
     null,
     2,
@@ -278,8 +286,8 @@ assert.equal(
 );
 
 // (3) All eight dependencies installed: plan succeeds, plan.pi.dependencies is
-// exactly the fixed eight packages, targets are exactly the current twelve,
-// the plan carries schema_version 2, the parsed Pi version (bare output form)
+// exactly the fixed eight packages, targets are exactly the current sixteen,
+// the plan carries schema_version 3, the parsed Pi version (bare output form)
 // with the enforced minimum, and every dependency's installed version.
 const case3Root = join(fixtureRoot, "case3-all-eight");
 result = runPlan(FIXED_DEPENDENCIES, case3Root, { piVersion: "0.84.2" });
@@ -301,7 +309,7 @@ assert.match(
 assert.ok(existsSync(planPath), `plan.json must exist at ${planPath}`);
 const plan = JSON.parse(readFileSync(planPath, "utf8"));
 assert.equal(plan.status, "planned");
-assert.equal(plan.schema_version, 2, "plan schema_version must be 2");
+assert.equal(plan.schema_version, 3, "plan schema_version must be 3");
 assert.deepEqual(
   plan.pi.dependencies,
   FIXED_DEPENDENCIES,
@@ -325,12 +333,12 @@ assert.deepEqual(
 assert.equal(
   plan.targets.length,
   TARGET_IDS.length,
-  "targets must be exactly the current twelve",
+  "targets must be exactly the current sixteen",
 );
 assert.deepEqual(
   plan.targets.map((target) => target.id),
   TARGET_IDS,
-  "target IDs must be exactly the current twelve",
+  "target IDs must be exactly the current sixteen",
 );
 
 // Rebuilds the fake Pi environment from an approved plan so apply re-runs the
@@ -365,7 +373,7 @@ function runApply(planPath, sha256Hex, extraEnv = {}) {
 
 // (4) Apply the case-3 approved plan with the exact SHA from stdout: the
 // install/backup/verification success path must exit 0, write a succeeded
-// result, record a 12-target manifest, and leave exactly the eleven managed
+// result, record a 16-target manifest, and leave exactly the fifteen managed
 // writes in place — while settings.json (observe-only) is never created.
 const approvedPlan = JSON.parse(readFileSync(planPath, "utf8"));
 const managedTargets = approvedPlan.targets.filter(
@@ -373,8 +381,8 @@ const managedTargets = approvedPlan.targets.filter(
 );
 assert.equal(
   managedTargets.length,
-  11,
-  "fresh-root plan must have exactly eleven managed targets",
+  15,
+  "fresh-root plan must have exactly fifteen managed targets",
 );
 assert.deepEqual(
   approvedPlan.targets
@@ -414,7 +422,7 @@ assert.equal(
 assert.equal(
   applyResult.operations.length,
   managedTargets.length,
-  "result.json must record exactly the eleven managed operations",
+  "result.json must record exactly the fifteen managed operations",
 );
 assert.ok(
   applyResult.operations.every((operation) => operation.type === "create"),
@@ -424,7 +432,7 @@ const successManifest = JSON.parse(readFileSync(applyResult.manifest, "utf8"));
 assert.equal(
   successManifest.targets.length,
   TARGET_IDS.length,
-  "manifest must have exactly the current twelve targets",
+  "manifest must have exactly the current sixteen targets",
 );
 assert.deepEqual(
   successManifest.targets.map((item) => item.id),
@@ -453,6 +461,8 @@ for (const id of [
   "extensions/orchestrator-mode/index.ts",
   "extensions/orchestrator-mode/orchestrator-policy.md",
   "extensions/orchestrator-mode/orchestrator-goal-policy.md",
+  "extensions/orchestrator-mode/council.ts",
+  "extensions/orchestrator-mode/council-policy.md",
 ]) {
   const target = managedTargets.find((item) => item.id === id);
   assert.equal(
@@ -461,6 +471,24 @@ for (const id of [
     `extension must be an exact copy of its plan source: ${id}`,
   );
 }
+assert.equal(
+  readFileSync(join(case3Root, "council.json"), "utf8"),
+  readFileSync(join(projectRoot, "config/council.json"), "utf8"),
+  "council.json must be installed from the template on a fresh root",
+);
+const councillorInstalled = readFileSync(
+  join(case3Root, "agents", "councillor.md"),
+  "utf8",
+);
+assert.ok(
+  !/^(?:model|thinking):/m.test(councillorInstalled),
+  "the installed councillor must never pin model or thinking (frontmatter values would override council.json)",
+);
+assert.match(
+  councillorInstalled,
+  /^run_in_background: false\r?$/m,
+  "the installed councillor must pin foreground dispatch",
+);
 const orchestratorInstalled = JSON.parse(
   readFileSync(join(case3Root, "orchestrator-mode.json"), "utf8"),
 );
@@ -490,7 +518,7 @@ assert.equal(
 
 // (5) Injected verification failure: a fresh config root and a fresh
 // one-time plan, applied with PI_OMO_INSTALL_TEST_MODE=1 and
-// PI_OMO_INSTALL_TEST_FAILURE=during_verification. All eleven managed writes
+// PI_OMO_INSTALL_TEST_FAILURE=during_verification. All fifteen managed writes
 // and the directories created for them must be rolled back exactly as the
 // plan's rollback contract describes, with no unresolved paths, while the
 // audit and backup records are retained and settings.json still never
@@ -515,8 +543,8 @@ const failureManaged = failurePlan.targets.filter(
 );
 assert.equal(
   failureManaged.length,
-  11,
-  "fresh-root plan must have exactly eleven managed targets",
+  15,
+  "fresh-root plan must have exactly fifteen managed targets",
 );
 assert.equal(
   failurePlan.rollback.delete_files.length,
@@ -638,7 +666,7 @@ const failureManifest = JSON.parse(
 assert.equal(
   failureManifest.targets.length,
   TARGET_IDS.length,
-  "backup manifest must cover all twelve targets",
+  "backup manifest must cover all sixteen targets",
 );
 assert.ok(
   failureManifest.targets.every((item) => item.existed === false),
@@ -1071,21 +1099,24 @@ writeFileSync(
     {
       routing: "strict",
       orchestratorDefaultEnabled: false,
-      agents: Object.fromEntries(
-        ROLES.map((role) => [
-          role,
-          {
-            action:
-              role === "Explore"
-                ? caseInsensitive
-                  ? "keep"
-                  : "install"
-                : "install",
-            model: "inherit",
-            thinking: "inherit",
-          },
-        ]),
-      ),
+      agents: {
+        ...Object.fromEntries(
+          ROLES.map((role) => [
+            role,
+            {
+              action:
+                role === "Explore"
+                  ? caseInsensitive
+                    ? "keep"
+                    : "install"
+                  : "install",
+              model: "inherit",
+              thinking: "inherit",
+            },
+          ]),
+        ),
+        [COUNCILLOR]: { action: "install" },
+      },
     },
     null,
     2,
@@ -1144,21 +1175,24 @@ writeFileSync(
     {
       routing: "strict",
       orchestratorDefaultEnabled: false,
-      agents: Object.fromEntries(
-        ROLES.map((role) => [
-          role,
-          {
-            action: "install",
-            model:
-              role === "Explore"
-                ? "gpt-5"
-                : role === "Oracle"
-                  ? "fake-prov/gpt-5"
-                  : "inherit",
-            thinking: "inherit",
-          },
-        ]),
-      ),
+      agents: {
+        ...Object.fromEntries(
+          ROLES.map((role) => [
+            role,
+            {
+              action: "install",
+              model:
+                role === "Explore"
+                  ? "gpt-5"
+                  : role === "Oracle"
+                    ? "fake-prov/gpt-5"
+                    : "inherit",
+              thinking: "inherit",
+            },
+          ]),
+        ),
+        [COUNCILLOR]: { action: "install" },
+      },
     },
     null,
     2,
@@ -1184,6 +1218,218 @@ assert.ok(
 assert.ok(
   modelsPlan.pi.models.includes("fake-prov/gpt-5"),
   "plan must record the provider/model pair",
+);
+
+// (C) Council v3 contract: the councillor agent's action-only schema, the
+// never-pin-model invariant through install and replace, and council.json's
+// install-if-absent / keep-if-exists / invalid-fails semantics.
+const caseC1aRoot = join(fixtureRoot, "caseC1a-missing-councillor");
+const noCouncillorRequest = join(fixtureRoot, "request-no-councillor.json");
+const baseRequest = JSON.parse(readFileSync(requestPath, "utf8"));
+delete baseRequest.agents[COUNCILLOR];
+writeFileSync(
+  noCouncillorRequest,
+  `${JSON.stringify(baseRequest, null, 2)}\n`,
+  "utf8",
+);
+result = runPlan(FIXED_DEPENDENCIES, caseC1aRoot, {
+  piVersion: "0.84.2",
+  requestPath: noCouncillorRequest,
+});
+assert.notEqual(
+  result.status,
+  0,
+  "a request without the councillor entry must fail",
+);
+assert.match(
+  result.stderr,
+  /missing: councillor/,
+  `stderr must point at the missing councillor role:\n${result.stderr}`,
+);
+
+const caseC1bRoot = join(fixtureRoot, "caseC1b-councillor-model-field");
+const councillorModelRequest = join(
+  fixtureRoot,
+  "request-councillor-model.json",
+);
+const withModel = JSON.parse(readFileSync(requestPath, "utf8"));
+withModel.agents[COUNCILLOR] = { action: "install", model: "inherit" };
+writeFileSync(
+  councillorModelRequest,
+  `${JSON.stringify(withModel, null, 2)}\n`,
+  "utf8",
+);
+result = runPlan(FIXED_DEPENDENCIES, caseC1bRoot, {
+  piVersion: "0.84.2",
+  requestPath: councillorModelRequest,
+});
+assert.notEqual(
+  result.status,
+  0,
+  "a councillor entry carrying model must fail",
+);
+assert.match(
+  result.stderr,
+  /agents\.councillor has unknown field: model/,
+  `stderr must reject a model field on the councillor entry:\n${result.stderr}`,
+);
+
+// council.json install-if-absent is covered by cases (3)/(4); an existing
+// roster is kept byte-for-byte.
+const caseC3Root = join(fixtureRoot, "caseC3-council-keep");
+mkdirSync(caseC3Root, { recursive: true });
+const customCouncil = `${JSON.stringify(
+  { councillors: [{ name: "solo" }] },
+  null,
+  2,
+)}\n`;
+writeFileSync(join(caseC3Root, "council.json"), customCouncil, "utf8");
+result = runPlan(FIXED_DEPENDENCIES, caseC3Root, { piVersion: "0.84.2" });
+assert.equal(
+  result.status,
+  0,
+  `plan with an existing council.json must succeed:\n${result.stderr}`,
+);
+const [councilKeepPlanPath, councilKeepSha] = result.stdout
+  .trim()
+  .split(/\r?\n/);
+const councilKeepPlan = JSON.parse(readFileSync(councilKeepPlanPath, "utf8"));
+const councilKeepTarget = councilKeepPlan.targets.find(
+  (target) => target.id === "council.json",
+);
+assert.equal(
+  councilKeepTarget.planned_action,
+  "keep",
+  "an existing council.json must be planned as keep",
+);
+assert.equal(
+  councilKeepTarget.may_modify,
+  false,
+  "a kept council.json must not be modifiable",
+);
+result = runApply(councilKeepPlanPath, councilKeepSha);
+assert.equal(
+  result.status,
+  0,
+  `apply with a kept council.json must succeed:\n${result.stderr}`,
+);
+assert.equal(
+  readFileSync(join(caseC3Root, "council.json"), "utf8"),
+  customCouncil,
+  "the user's council.json must be kept byte-for-byte",
+);
+
+// An invalid existing council.json fails plan before any audit write.
+const caseC4Root = join(fixtureRoot, "caseC4-invalid-council-json");
+mkdirSync(caseC4Root, { recursive: true });
+writeFileSync(join(caseC4Root, "council.json"), "{ broken", "utf8");
+result = runPlan(FIXED_DEPENDENCIES, caseC4Root, { piVersion: "0.84.2" });
+assert.notEqual(
+  result.status,
+  0,
+  "an invalid existing council.json must fail plan",
+);
+assert.match(
+  result.stderr,
+  /Invalid council\.json JSON/,
+  `stderr must report the invalid council.json:\n${result.stderr}`,
+);
+assert.equal(
+  existsSync(join(caseC4Root, "install-records")),
+  false,
+  noAuditCreated(caseC4Root),
+);
+
+// Councillor conflict flows: install against a conflict is refused, keep
+// preserves the user's file byte-for-byte, and replace lands the transformed
+// template with no model/thinking pin and foreground dispatch pinned.
+const caseC5Root = join(fixtureRoot, "caseC5-councillor-conflict");
+mkdirSync(join(caseC5Root, "agents"), { recursive: true });
+const customCouncillor =
+  '---\ndescription: "custom councillor"\nmodel: some/model\n---\n\nCustom body.\n';
+writeFileSync(
+  join(caseC5Root, "agents", "councillor.md"),
+  customCouncillor,
+  "utf8",
+);
+result = runPlan(FIXED_DEPENDENCIES, caseC5Root, { piVersion: "0.84.2" });
+assert.notEqual(
+  result.status,
+  0,
+  "councillor install against a conflict must fail",
+);
+assert.match(
+  result.stderr,
+  /Conflict requires keep or replace: agents\/councillor\.md/,
+  `stderr must demand keep or replace:\n${result.stderr}`,
+);
+const councillorActionRequest = (action) => {
+  const pathname = join(fixtureRoot, `request-councillor-${action}.json`);
+  const request = JSON.parse(readFileSync(requestPath, "utf8"));
+  request.agents[COUNCILLOR] = { action };
+  writeFileSync(pathname, `${JSON.stringify(request, null, 2)}\n`, "utf8");
+  return pathname;
+};
+result = runPlan(FIXED_DEPENDENCIES, caseC5Root, {
+  piVersion: "0.84.2",
+  requestPath: councillorActionRequest("keep"),
+});
+assert.equal(
+  result.status,
+  0,
+  `plan with councillor keep must succeed:\n${result.stderr}`,
+);
+const [councillorKeepPlanPath, councillorKeepSha] = result.stdout
+  .trim()
+  .split(/\r?\n/);
+result = runApply(councillorKeepPlanPath, councillorKeepSha);
+assert.equal(
+  result.status,
+  0,
+  `apply with councillor keep must succeed:\n${result.stderr}`,
+);
+assert.equal(
+  readFileSync(join(caseC5Root, "agents", "councillor.md"), "utf8"),
+  customCouncillor,
+  "the kept custom councillor must be untouched",
+);
+const caseC5bRoot = join(fixtureRoot, "caseC5b-councillor-replace");
+mkdirSync(join(caseC5bRoot, "agents"), { recursive: true });
+writeFileSync(
+  join(caseC5bRoot, "agents", "councillor.md"),
+  customCouncillor,
+  "utf8",
+);
+result = runPlan(FIXED_DEPENDENCIES, caseC5bRoot, {
+  piVersion: "0.84.2",
+  requestPath: councillorActionRequest("replace"),
+});
+assert.equal(
+  result.status,
+  0,
+  `plan with councillor replace must succeed:\n${result.stderr}`,
+);
+const [councillorReplacePlanPath, councillorReplaceSha] = result.stdout
+  .trim()
+  .split(/\r?\n/);
+result = runApply(councillorReplacePlanPath, councillorReplaceSha);
+assert.equal(
+  result.status,
+  0,
+  `apply with councillor replace must succeed:\n${result.stderr}`,
+);
+const replacedCouncillor = readFileSync(
+  join(caseC5bRoot, "agents", "councillor.md"),
+  "utf8",
+);
+assert.ok(
+  !/^(?:model|thinking):/m.test(replacedCouncillor),
+  "the replaced councillor must carry no model or thinking pin",
+);
+assert.match(
+  replacedCouncillor,
+  /^run_in_background: false\r?$/m,
+  "the replaced councillor must pin foreground dispatch",
 );
 
 // --- Documentation and policy surface assertions -------------------------
@@ -1649,6 +1895,82 @@ for (const [name, text] of [
     text,
     /github\.com\/tintinweb\/pi-tasks/,
     `${name} table must reference the pi-tasks repository`,
+  );
+}
+
+// Council surface: both READMEs document /council, the council.json roster,
+// and the honest boundary disclosures; INSTALL_AGENT.md carries the v3
+// fourteen-destination/sixteen-target contract and the action-only councillor
+// schema; no document mentions ultrawork (deferred, not shipped here).
+for (const [name, text, boundaryPhrases] of [
+  [
+    "README.md",
+    docs["README.md"],
+    [
+      [/not independent verification/, "same-model agreement caveat"],
+      [/bounded by your session model/, "main-session synthesizer limit"],
+    ],
+  ],
+  [
+    "README.zh-CN.md",
+    docs["README.zh-CN.md"],
+    [
+      [/不构成独立验证/, "same-model agreement caveat"],
+      [/受你的会话模型限制/, "main-session synthesizer limit"],
+    ],
+  ],
+]) {
+  assert.match(
+    text,
+    /\/council /,
+    `${name} must document the /council command`,
+  );
+  assert.match(
+    text,
+    /council\.json/,
+    `${name} must document the council.json roster`,
+  );
+  assert.match(
+    text,
+    /`\.pi\/agents\/councillor\.md`/,
+    `${name} must disclose the project-level override boundary`,
+  );
+  for (const [phrase, label] of boundaryPhrases)
+    assert.match(
+      text,
+      phrase,
+      `${name} must disclose the ${label}`,
+    );
+}
+assert.match(
+  docs["INSTALL_AGENT.md"],
+  /fourteen destinations/,
+  "INSTALL_AGENT.md must list fourteen inspection destinations",
+);
+assert.match(
+  docs["INSTALL_AGENT.md"],
+  /sixteen-target `manifest\.json`/,
+  "INSTALL_AGENT.md must describe the sixteen-target manifest",
+);
+assert.match(
+  docs["INSTALL_AGENT.md"],
+  /`councillor`: `install`, `keep`, or `replace` — action only/,
+  "INSTALL_AGENT.md must define the action-only councillor schema",
+);
+assert.match(
+  docs["INSTALL_AGENT.md"],
+  /`pi-subagents` resolves agent-file frontmatter over per-dispatch parameters/,
+  "INSTALL_AGENT.md must explain why the councillor schema is action-only",
+);
+assert.match(
+  docs["INSTALL_AGENT.md"],
+  /An existing `council\.json` is always kept/,
+  "INSTALL_AGENT.md must document the council.json keep semantics",
+);
+for (const [name, text] of docEntries) {
+  assert.ok(
+    !/ultrawork|\/ulw\b/i.test(text),
+    `${name} must not mention ultrawork (deferred, not part of this change)`,
   );
 }
 

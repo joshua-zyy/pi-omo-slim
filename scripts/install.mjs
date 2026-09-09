@@ -25,13 +25,22 @@ const ROLES = [
   "fixer",
   "verifier",
 ];
-const AGENT_IDS = ROLES.map((role) => `agents/${role}.md`);
+// The councillor agent participates in install/keep/replace conflict handling
+// like the six specialists, but its schema is action-only (see
+// validateRequest): its template must never pin model or thinking because
+// frontmatter values override per-dispatch parameters in pi-subagents, which
+// would silently defeat council.json as the sole per-councillor model source.
+const COUNCILLOR = "councillor";
+const AGENT_IDS = [...ROLES, COUNCILLOR].map((role) => `agents/${role}.md`);
 const TARGET_IDS = [
   ...AGENT_IDS,
   "extensions/orchestrator-mode/index.ts",
   "extensions/orchestrator-mode/orchestrator-policy.md",
   "extensions/orchestrator-mode/orchestrator-goal-policy.md",
+  "extensions/orchestrator-mode/council.ts",
+  "extensions/orchestrator-mode/council-policy.md",
   "orchestrator-mode.json",
+  "council.json",
   "subagents.json",
   "settings.json",
 ];
@@ -67,7 +76,10 @@ const PI_SUBAGENTS_IDENTIFIER = "npm:@tintinweb/pi-subagents";
 const PI_SUBAGENTS_MINIMUM_VERSION = "0.19.0";
 const PI_TASKS_IDENTIFIER = "npm:@tintinweb/pi-tasks";
 const PI_TASKS_MINIMUM_VERSION = "0.9.0";
-const PLAN_SCHEMA_VERSION = 2;
+const PLAN_SCHEMA_VERSION = 3;
+// transformAgent choice that strips model/thinking and injects nothing; used
+// for the councillor template, which must always inherit both.
+const INHERIT_ONLY_CHOICE = { model: "inherit", thinking: "inherit" };
 // The first `major.minor.patch` token in the output: real `pi --version`
 // prints a bare version and test doubles print a `pi x.y.z` prefix, so the
 // leading `(?:^|\s)` tolerates both. Comparison is numeric, never string
@@ -230,11 +242,17 @@ function validateRequest(request) {
   if (typeof request.orchestratorDefaultEnabled !== "boolean")
     fail("orchestratorDefaultEnabled must be boolean");
   assertObject(request.agents, "agents");
+  const agentRoles = [...ROLES, COUNCILLOR];
   if (
-    Object.keys(request.agents).length !== ROLES.length ||
-    ROLES.some((role) => !(role in request.agents))
-  )
-    fail(`agents must contain exactly ${ROLES.length} required roles`);
+    Object.keys(request.agents).length !== agentRoles.length ||
+    agentRoles.some((role) => !(role in request.agents))
+  ) {
+    const missing = agentRoles.filter((role) => !(role in request.agents));
+    fail(
+      `agents must contain exactly ${agentRoles.length} required roles` +
+        (missing.length ? `; missing: ${missing.join(", ")}` : ""),
+    );
+  }
   for (const role of ROLES) {
     const choice = request.agents[role];
     assertObject(choice, `agents.${role}`);
@@ -252,6 +270,11 @@ function validateRequest(request) {
     if (typeof choice.thinking !== "string" || !THINKING.has(choice.thinking))
       fail(`Invalid thinking for ${role}`);
   }
+  const councillorChoice = request.agents[COUNCILLOR];
+  assertObject(councillorChoice, `agents.${COUNCILLOR}`);
+  assertKeys(councillorChoice, new Set(["action"]), `agents.${COUNCILLOR}`);
+  if (!ACTIONS.has(councillorChoice.action))
+    fail(`Invalid action for ${COUNCILLOR}`);
   return request;
 }
 
@@ -565,6 +588,7 @@ function planMain(argv) {
     join(configRoot, "orchestrator-mode.json"),
     "orchestrator-mode.json",
   );
+  validateJsonObject(join(configRoot, "council.json"), "council.json");
   validateJsonObject(join(configRoot, "subagents.json"), "subagents.json");
   validateJsonObject(join(configRoot, "settings.json"), "settings.json");
   const targets = TARGET_IDS.map((id) => {
@@ -583,6 +607,10 @@ function planMain(argv) {
         );
       action = requested;
     } else if (id === "orchestrator-mode.json") action = "merge";
+    else if (id === "council.json")
+      // The roster is user configuration: install the template only when the
+      // file is absent; any existing file is kept without asking.
+      action = state.exists_before ? "keep" : "install";
     else if (id === "subagents.json")
       action = request.routing === "strict" ? "merge" : "keep";
     else if (id === "settings.json") action = "observe";
@@ -653,9 +681,10 @@ function planMain(argv) {
     request: {
       routing: request.routing,
       orchestratorDefaultEnabled: request.orchestratorDefaultEnabled,
-      agents: Object.fromEntries(
-        ROLES.map((role) => [role, { ...request.agents[role] }]),
-      ),
+      agents: Object.fromEntries([
+        ...ROLES.map((role) => [role, { ...request.agents[role] }]),
+        [COUNCILLOR, { action: request.agents[COUNCILLOR].action }],
+      ]),
     },
     pi: {
       executable: pi.executable,
@@ -742,9 +771,21 @@ function expectedSourceMap(repositoryRoot) {
       ),
     ],
     [
+      "extensions/orchestrator-mode/council.ts",
+      join(repositoryRoot, "extensions/orchestrator-mode/council.ts"),
+    ],
+    [
+      "extensions/orchestrator-mode/council-policy.md",
+      join(
+        repositoryRoot,
+        "extensions/orchestrator-mode/council-policy.md",
+      ),
+    ],
+    [
       "orchestrator-mode.json",
       join(repositoryRoot, "config/orchestrator-mode.json.example"),
     ],
+    ["council.json", join(repositoryRoot, "config/council.json")],
     ["subagents.json", join(repositoryRoot, "config/subagents.json")],
     ["settings.json", null],
   ]);
@@ -909,6 +950,8 @@ function validatePlan(plan, planPath) {
       )
         fail(`Invalid Agent action for ${target.id}`);
     } else if (target.id === "orchestrator-mode.json") expectedAction = "merge";
+    else if (target.id === "council.json")
+      expectedAction = target.exists_before ? "keep" : "install";
     else if (target.id === "subagents.json")
       expectedAction = plan.request.routing === "strict" ? "merge" : "keep";
     else if (target.id === "settings.json") expectedAction = "observe";
@@ -992,7 +1035,7 @@ function transformAgent(sourceBytes, choice, role) {
   return Buffer.from(transformed, "utf8");
 }
 
-// Classifies an agents-directory entry against the six managed Agent targets:
+// Classifies an agents-directory entry against the managed Agent targets:
 // "exact" (a managed target), "same-file-variant" (a case-variant that the
 // filesystem resolves to the exact target file, i.e. a case-insensitive
 // filesystem), "independent-variant" (a separate file on a case-sensitive
@@ -1337,7 +1380,7 @@ function applyMain(argv) {
     injectFailure("after_backup");
     testPause("after_backup");
 
-    for (const role of ROLES) {
+    for (const role of [...ROLES, COUNCILLOR]) {
       const target = plan.targets.find(
         (item) => item.id === `agents/${role}.md`,
       );
@@ -1346,7 +1389,9 @@ function applyMain(argv) {
         target,
         transformAgent(
           verifiedSources.get(target.id),
-          plan.request.agents[role],
+          role === COUNCILLOR
+            ? INHERIT_ONLY_CHOICE
+            : plan.request.agents[role],
           role,
         ),
       );
@@ -1355,6 +1400,8 @@ function applyMain(argv) {
       "extensions/orchestrator-mode/index.ts",
       "extensions/orchestrator-mode/orchestrator-policy.md",
       "extensions/orchestrator-mode/orchestrator-goal-policy.md",
+      "extensions/orchestrator-mode/council.ts",
+      "extensions/orchestrator-mode/council-policy.md",
     ]) {
       const target = plan.targets.find((item) => item.id === id);
       if (target.may_modify) writeManaged(target, verifiedSources.get(id));
@@ -1371,6 +1418,11 @@ function applyMain(argv) {
         }),
       ),
     );
+    const councilTarget = plan.targets.find(
+      (item) => item.id === "council.json",
+    );
+    if (councilTarget.may_modify)
+      writeManaged(councilTarget, verifiedSources.get("council.json"));
     if (plan.request.routing === "strict") {
       const routingTarget = plan.targets.find(
         (item) => item.id === "subagents.json",
@@ -1400,14 +1452,16 @@ function applyMain(argv) {
     for (const item of manifest.targets)
       if (item.backup_path && sha256(item.backup_path) !== item.backup_sha256)
         fail(`Backup hash mismatch: ${item.id}`);
-    for (const role of ROLES) {
+    for (const role of [...ROLES, COUNCILLOR]) {
       const target = plan.targets.find(
         (item) => item.id === `agents/${role}.md`,
       );
       if (target.may_modify) {
         const expected = transformAgent(
           verifiedSources.get(target.id),
-          plan.request.agents[role],
+          role === COUNCILLOR
+            ? INHERIT_ONLY_CHOICE
+            : plan.request.agents[role],
           role,
         );
         if (!readFileSync(target.destination).equals(expected))
@@ -1420,6 +1474,14 @@ function applyMain(argv) {
           !/^prompt_mode: replace\r?$/m.test(installedText)
         )
           fail(`Agent safety verification failed: ${role}`);
+        if (
+          role === COUNCILLOR &&
+          /^(?:model|thinking):\s*\S/m.test(installedText)
+        )
+          fail(
+            "Councillor must never pin model or thinking: frontmatter values " +
+              "would override council.json per-councillor choices",
+          );
       } else if (beforeHashes.get(target.id) !== sha256(target.destination))
         fail(`Kept Agent changed: ${role}`);
     }
@@ -1427,6 +1489,8 @@ function applyMain(argv) {
       "extensions/orchestrator-mode/index.ts",
       "extensions/orchestrator-mode/orchestrator-policy.md",
       "extensions/orchestrator-mode/orchestrator-goal-policy.md",
+      "extensions/orchestrator-mode/council.ts",
+      "extensions/orchestrator-mode/council-policy.md",
     ]) {
       const target = plan.targets.find((item) => item.id === id);
       if (
@@ -1448,6 +1512,18 @@ function applyMain(argv) {
       })
     )
       fail("Orchestrator verification failed");
+    if (councilTarget.may_modify) {
+      if (
+        !readFileSync(councilTarget.destination).equals(
+          verifiedSources.get("council.json"),
+        )
+      )
+        fail("Council config verification failed");
+    } else if (
+      sha256(councilTarget.destination) !==
+      beforeHashes.get(councilTarget.id)
+    )
+      fail("Kept council.json changed");
     const routingTarget = plan.targets.find(
       (item) => item.id === "subagents.json",
     );

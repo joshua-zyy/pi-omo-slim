@@ -27,9 +27,9 @@ This document is the operational contract for an Agent after this repository is 
 
 ## 1. Inspect and collect choices
 
-Read `README.md`, `scripts/install.mjs`, all six `agents/*.md` templates, all three files under `extensions/orchestrator-mode/`, and the two files under `config/`.
+Read `README.md`, `scripts/install.mjs`, all seven `agents/*.md` templates (six specialists plus `councillor`), all five files under `extensions/orchestrator-mode/`, and the three files under `config/`.
 
-Inspect the following twelve destinations and list unrelated custom Agents:
+Inspect the following fourteen destinations and list unrelated custom Agents:
 
 ```text
 agents/Explore.md
@@ -38,10 +38,14 @@ agents/oracle.md
 agents/designer.md
 agents/fixer.md
 agents/verifier.md
+agents/councillor.md
 extensions/orchestrator-mode/index.ts
 extensions/orchestrator-mode/orchestrator-policy.md
 extensions/orchestrator-mode/orchestrator-goal-policy.md
+extensions/orchestrator-mode/council.ts
+extensions/orchestrator-mode/council-policy.md
 orchestrator-mode.json
+council.json
 subagents.json
 settings.json
 ```
@@ -52,8 +56,9 @@ Ask the user to choose:
 
 - `routing`: `strict` merges `disableDefaultAgents: true` and `fallbackSubagent: "none"`; `compatibility` leaves `subagents.json` absent or byte-for-byte unchanged.
 - `orchestratorDefaultEnabled`: `true` or `false` for sessions without an explicit branch override.
-- for each role, `model`: `inherit` or an exact ID from `pi --list-models`.
-- for each role, `thinking`: `inherit`, `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. Pi may clamp a level to a model's capability.
+- for each specialist role, `model`: `inherit` or an exact ID from `pi --list-models`.
+- for each specialist role, `thinking`: `inherit`, `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. Pi may clamp a level to a model's capability.
+- `councillor`: `install`, `keep`, or `replace` — action only. The councillor template takes no model or thinking choice: `pi-subagents` resolves agent-file frontmatter over per-dispatch parameters, so a pinned value would silently override `council.json`'s per-councillor models. The template always inherits both; `council.json` is the sole per-councillor model source.
 
 Write those choices to a short `request.json` at an exact user-approved path. The schema is closed; do not add comments or extra fields:
 
@@ -67,7 +72,8 @@ Write those choices to a short `request.json` at an exact user-approved path. Th
     "oracle": { "action": "install", "model": "inherit", "thinking": "inherit" },
     "designer": { "action": "install", "model": "inherit", "thinking": "inherit" },
     "fixer": { "action": "install", "model": "inherit", "thinking": "inherit" },
-    "verifier": { "action": "install", "model": "inherit", "thinking": "inherit" }
+    "verifier": { "action": "install", "model": "inherit", "thinking": "inherit" },
+    "councillor": { "action": "install" }
   }
 }
 ```
@@ -80,7 +86,7 @@ Show the exact command and obtain approval to create the audit plan, then run:
 node scripts/install.mjs plan --request <absolute-request.json> --config-root <absolute-config-root>
 ```
 
-`plan` validates the closed request, repository templates, Pi version and dependency minimums, Pi dependencies/models, same-name conflict decisions, JSON objects, paths, and symbolic-link safety. Its only configuration-root write is:
+`plan` validates the closed request, repository templates, Pi version and dependency minimums, Pi dependencies/models, same-name conflict decisions, JSON objects, paths, and symbolic-link safety. An existing `council.json` is always kept — the councillor roster is user configuration — and an existing `council.json` that is not a valid JSON object fails `plan`; the default roster template is written only when the file is absent. Its only configuration-root write is:
 
 ```text
 <config-root>/install-records/<plan-id>/plan.json
@@ -118,7 +124,7 @@ node scripts/install.mjs apply --plan <absolute-plan.json> --sha256 <approved-64
 `apply` rejects a changed plan, changed repository template, changed approved replacement, prior attempt, or occupied output path before configuration mutation. It then:
 
 1. creates `apply-started.json` so an interrupted plan cannot be silently retried;
-2. backs up the latest execution-time target state and writes a twelve-target `manifest.json`;
+2. backs up the latest execution-time target state and writes a sixteen-target `manifest.json`;
 3. installs only approved Agent/extension files and merges only approved JSON fields;
 4. leaves `settings.json` live bytes untouched while backing up its latest state;
 5. runs fixed verification;
@@ -145,7 +151,10 @@ On success, tell the user to restart Pi or start a new session, then use:
 /orchestrator status
 /orchestrator on
 /orchestrator off
+/council doctor
 ```
+
+`/council doctor` reports the council policy, the installed `council.json` roster with model-registry hints, the installed councillor template (warning when a custom template pins `model`/`thinking` or forces background dispatch), and Agent-tool registration. It checks only the global template and global `council.json`; a project-level `.pi/agents/councillor.md` override is not covered, and registry presence never guarantees dispatch success.
 
 Goal sessions are user-initiated only. The user must explicitly run a native `pi-goal` command, for example:
 

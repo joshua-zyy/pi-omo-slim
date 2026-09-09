@@ -6,6 +6,7 @@ import {
 	type ExtensionAPI,
 	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { registerCouncil } from "./council.ts";
 
 const STATE_ENTRY = "orchestrator-mode";
 const GOAL_STATE_ENTRY = "goal-state";
@@ -27,6 +28,7 @@ const ROLE_FILES = [
 	"designer",
 	"fixer",
 	"verifier",
+	"councillor",
 ];
 
 type OrchestratorState = {
@@ -355,6 +357,8 @@ export default function orchestratorModeExtension(pi: ExtensionAPI) {
 			}
 		},
 	});
+
+	registerCouncil(pi);
 
 	pi.on("session_start", async (_event, ctx) => {
 		restoreState(ctx);
