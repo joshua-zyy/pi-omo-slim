@@ -52,6 +52,8 @@ settings.json
 
 For each conflicting same-name Agent, ask separately whether to `keep` it byte-for-byte or `replace` it with this project's template. An absent or byte-identical Agent uses `install`.
 
+Extension files under `extensions/orchestrator-mode/` have no `keep` action — the plan always installs the repository version. A destination that differs from the repository template may therefore hold an uncommitted local fix rather than an outdated template. Before approving, compare each differing destination against its most recent backup under `<config-root>/backups/`: a file that differs from both the template and its last-installed backup carries local modifications that this apply will discard. Port them into the repository first, or the upgrade silently reverts them.
+
 Ask the user to choose:
 
 - `routing`: `strict` merges `disableDefaultAgents: true` and `fallbackSubagent: "none"`; `compatibility` leaves `subagents.json` absent or byte-for-byte unchanged.
