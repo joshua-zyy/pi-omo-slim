@@ -207,6 +207,16 @@ export default function orchestratorModeExtension(pi: ExtensionAPI) {
 
 	const audit = () => auditAgentTools(new Set(pi.getAllTools().map((t) => t.name)));
 
+	// The startup audit runs on the first agent_start, not session_start:
+	// extensions that register their tools from their own session_start
+	// (pi-fff >= 0.10.6 defers registration this way) have not run yet when
+	// this extension's session_start fires — auto-discovered user extensions
+	// load before packages — so an immediate audit false-positives on tools
+	// that are registered moments later. agent_start fires only after every
+	// session_start handler has completed, which is also when the selectors
+	// actually start to matter.
+	let startupAuditDone = false;
+
 	const updateStatus = (ctx: ExtensionContext) => {
 		if (!ctx.hasUI) return;
 		ctx.ui.setStatus(STATUS_KEY, enabled ? "orchestrator: ON" : undefined);
@@ -360,8 +370,9 @@ export default function orchestratorModeExtension(pi: ExtensionAPI) {
 
 	registerCouncil(pi);
 
-	pi.on("session_start", async (_event, ctx) => {
-		restoreState(ctx);
+	const runStartupAudit = (ctx: ExtensionContext) => {
+		if (startupAuditDone) return;
+		startupAuditDone = true;
 
 		// Only confirmed problems are surfaced here. Missing agent files are normal
 		// outside an installed configuration, so they stay silent until /orchestrator
@@ -375,6 +386,13 @@ export default function orchestratorModeExtension(pi: ExtensionAPI) {
 				)}. Those roles run without them. Run /orchestrator doctor for details.`,
 				"warning",
 			);
+	};
+
+	pi.on("session_start", async (_event, ctx) => {
+		restoreState(ctx);
+	});
+	pi.on("agent_start", async (_event, ctx) => {
+		runStartupAudit(ctx);
 	});
 	pi.on("session_tree", async (_event, ctx) => restoreState(ctx));
 

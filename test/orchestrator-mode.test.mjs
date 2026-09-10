@@ -89,6 +89,7 @@ function createHarness(initialBranch = [], tools = ["alpha", "beta"]) {
     beforeAgentStart: (systemPrompt = "BASE") =>
       handlers.get("before_agent_start")({ systemPrompt }, context),
     start: () => handlers.get("session_start")({}, context),
+    agentStart: () => handlers.get("agent_start")({}, context),
   };
 }
 
@@ -162,6 +163,7 @@ function warnings(harness) {
 test("every declared ext: tool present warns about nothing", async () => {
   const harness = createHarness();
   await harness.start();
+  await harness.agentStart();
 
   assert.deepEqual(warnings(harness), []);
 });
@@ -169,6 +171,7 @@ test("every declared ext: tool present warns about nothing", async () => {
 test("a missing ext: tool warns once and names the affected roles", async () => {
   const harness = createHarness([], ["alpha"]);
   await harness.start();
+  await harness.agentStart();
 
   const found = warnings(harness);
   assert.equal(found.length, 1);
@@ -180,8 +183,26 @@ test("a missing ext: tool warns once and names the affected roles", async () => 
 test("an empty tool registry is treated as unknown, not as everything missing", async () => {
   const harness = createHarness([], []);
   await harness.start();
+  await harness.agentStart();
 
   assert.deepEqual(warnings(harness), []);
+});
+
+test("the startup audit defers to agent_start so late-registering tools are not false-flagged", async () => {
+  const harness = createHarness([], ["alpha"]);
+  // session_start fires before package extensions register their tools; an
+  // immediate audit would false-positive on ffgrep/fffind-style races.
+  await harness.start();
+  assert.deepEqual(warnings(harness), []);
+
+  await harness.agentStart();
+  const found = warnings(harness);
+  assert.equal(found.length, 1);
+  assert.match(found[0].message, /beta \(Explore, oracle\)/);
+
+  // Runs once per session, not per turn.
+  await harness.agentStart();
+  assert.equal(warnings(harness).length, 1);
 });
 
 test("doctor reports policy state, defaultEnabled source, and the audit", async () => {
