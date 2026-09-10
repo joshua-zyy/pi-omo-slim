@@ -77,6 +77,7 @@ node scripts/install.mjs apply --plan <absolute-plan.json> --sha256 <approved-pl
 /orchestrator on       为当前会话分支启用
 /orchestrator off      禁用
 /orchestrator status   显示当前状态
+/orchestrator doctor   诊断策略、agent 文件与工具选择器
 ```
 
 可选的全局配置文件为 `<config-root>/orchestrator-mode.json`：
@@ -90,6 +91,8 @@ node scripts/install.mjs apply --plan <absolute-plan.json> --sha256 <approved-pl
 `defaultEnabled` 仅影响本 Orchestrator Mode 扩展，不会启用或禁用任何其他 Pi 扩展。当该文件或属性不存在时，全局默认值为 `false`。无效的 JSON 或非布尔值会产生警告，并同样回退为 `false`。扩展会在加载时读取一次 `extensions/orchestrator-mode/orchestrator-policy.md` 和 `extensions/orchestrator-mode/orchestrator-goal-policy.md`；仅当当前会话分支存在活跃的原生 Goal 时，才注入 Goal addendum。编辑这些文件后，运行 `/reload` 或重启 Pi，让扩展重新加载它们。
 
 生效状态的优先级为：当前会话分支中最近一次显式状态，其次 `defaultEnabled`，最后 `false`。因此，当 Pi 打开新会话或切换到未记录模式状态的会话时，`defaultEnabled: true` 会启用该模式；而曾执行过 `/orchestrator on` 或 `/orchestrator off` 的会话分支则保留其显式状态。
+
+扩展还会把各 agent 的 `ext:` 工具选择器与会话实际提供的工具做一次审计。该审计在首个 agent 回合运行，而不是会话启动时：pi-fff 等扩展在自身的 `session_start` 处理器里注册工具，过早审计会把稍后才注册的工具误报为缺失。确实缺失的工具只警告一次；`/orchestrator doctor` 可随时查看完整报告。
 
 ## Council
 

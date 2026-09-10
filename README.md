@@ -77,6 +77,7 @@ Each one reports back, confirming the full roster with the Orchestrator ready to
 /orchestrator on       Enable it for the current session branch
 /orchestrator off      Disable it
 /orchestrator status   Show its current state
+/orchestrator doctor   Diagnose policies, agent files, and tool selectors
 ```
 
 The optional global configuration file is `<config-root>/orchestrator-mode.json`:
@@ -90,6 +91,8 @@ The optional global configuration file is `<config-root>/orchestrator-mode.json`
 `defaultEnabled` affects only this Orchestrator Mode extension; it does not enable or disable any other Pi extension. When the file or property is absent, the global default is `false`. Invalid JSON or a non-boolean value produces a warning and also falls back to `false`. The extension reads `extensions/orchestrator-mode/orchestrator-policy.md` and `extensions/orchestrator-mode/orchestrator-goal-policy.md` once at load. The Goal addendum is injected only while the current session branch has an active native Goal. After editing these files, run `/reload` or restart Pi so the extension reloads them.
 
 The effective state priority is: the latest explicit state in the current session branch, then `defaultEnabled`, then `false`. Consequently, `defaultEnabled: true` enables the mode when Pi opens a new session or switches to a session with no recorded mode state. A session branch that previously ran `/orchestrator on` or `/orchestrator off` retains that explicit state.
+
+The extension also audits every agent's `ext:` tool selectors against the tools the session actually provides. That audit runs once on the first agent turn rather than at session start: extensions such as pi-fff register their tools from their own `session_start` handlers, and auditing earlier false-flags tools that are registered moments later. A genuinely missing tool is reported once as a warning; `/orchestrator doctor` shows the full report on demand.
 
 ## Council
 
