@@ -1,20 +1,20 @@
 <Council>
 
-The user explicitly convened a council for the question below. Convene every listed councillor and synthesize their independent judgments. Do not replace the council with your own answer or one specialist's view.
+The user explicitly convened a council for the question below. Convene every listed councillor and synthesize their independent judgments. Do not bypass their reviews with your own answer or one specialist's view.
 
 Council reviews decisions, trade-offs, designs, and strategy. If the request is a work order, tell the user before dispatching that this Council will review the implementation approach only and will not make changes in this request. Ask for clarification only when different readings would materially change the review.
 
 ## Before dispatching
 
-- Build one concise fact pack for every councillor. Distinguish confirmed facts, applicable user and project constraints, assumptions, known unknowns, and prior Council judgments when present. Never present a prior judgment as a confirmed fact.
-- Choose any research or subagent input the question requires. The Librarian is optional; use it only for external research. Complete required preparation and fold relevant results into the shared fact pack before councillor dispatch.
+- Build one concise information pack for every councillor: relevant findings, user and project constraints, assumptions, unknowns, and prior Council judgments. Treat it as material to examine, not authoritative facts. Keep relevant sources and verification limits with each claim; distinguish findings from assumptions and prior judgments.
+- Choose any research or subagent input the question requires. The Librarian is optional; use it only for external research. Complete required preparation and fold relevant results into the shared information pack before councillor dispatch.
 - Use stable inputs. Wait for relevant writes to finish, or state the evidence timestamp and limitation.
 
 ## Dispatching
 
-- Once the fact pack is ready, emit exactly one Agent tool call per roster entry together in a single assistant message. Set `run_in_background: false` on each call. Do not wait for one councillor's result before emitting another call. Do not use `TaskCreate` or `TaskExecute` to dispatch councillors, and do not set `max_turns` for councillors.
+- Once the information pack is ready, emit exactly one Agent tool call per roster entry together in a single assistant message. Set `run_in_background: false` on each call. Do not wait for one councillor's result before emitting another call. Do not use `TaskCreate` or `TaskExecute` to dispatch councillors, and do not set `max_turns` for councillors.
 - For each roster entry, use `subagent_type: "councillor"` and its listed `name`. Apply `model` and `thinking` independently: pass each configured value and omit only the field that is unspecified or marked inherit.
-- Give every councillor the same fact pack and the user's question verbatim. Vary only the assigned perspective.
+- Give every councillor the same information pack and the user's question verbatim. Vary only the assigned perspective.
 - Tell each councillor that its perspective sets its focus, not its conclusion. Require independent judgment and investigation proportional to the question.
 - Request an understandable, substantive review. Ask for the conclusion first, or an inability to recommend and why; then key evidence and reasons, material risks or objections, and conditions that would change the recommendation. Ask for confidence and its main limitation when useful. Do not require fixed headings or the final Council report format.
 
@@ -36,7 +36,13 @@ Deliver in the question's language.
 3. **Per-councillor opinions** - faithfully summarize each response's expressed judgment and reasons, labeled with its roster name and model. Include confidence only when provided; do not infer missing judgments, reasons, or confidence.
 4. **Participation** - "N/M responded", with each absentee and its reason.
 
-For each key decision that affects the recommendation:
+Review each response on its own merits: its judgment, reasons, assumptions, and leads worth investigating. Treat responses as opinions and leads, not established facts. Check decision-changing premises, conflicts, and risks before relying on them, including those raised by a minority; reuse sufficient evidence and source new findings. If verification is unavailable, retain uncertainty or make the recommendation conditional. Resolve value trade-offs against the user's goals and constraints.
+
+Form your own recommendation from what holds up. You may adopt a minority view or reject all proposed recommendations; do not combine contributions merely to include everyone. Agreement, model identity, and self-reported confidence do not establish facts. When responses share a source or model, briefly disclose that their agreement is not independent verification.
+
+Preserve each claim's evidential limits in recommendations and per-councillor summaries; attribution alone is not verification. Qualify or omit unsupported claims. Keep your recommendation distinct from councillors' actual positions; never attribute your reasoning to them.
+
+For each key decision that affects the recommendation, state the proposition with its decision-changing conditions, scope, and sequencing. Rate only expressed positions on that proposition; support for a component does not imply support for the whole plan or its order:
 
 - Use all substantive responses from this round as the denominator, including `undecided` and `not addressed`; exclude absentees.
 - Keep explicit positions, `undecided`, and `not addressed` separate. Do not infer a position. `Undecided` means the councillor explicitly declined to choose; `not addressed` means its review did not cover that decision.
@@ -45,9 +51,7 @@ For each key decision that affects the recommendation:
 
 Split only decisions that affect the recommendation. Keep simple reports concise. Expand unresolved categories or disagreements only when they matter.
 
-Before deciding, review each response separately: identify its expressed judgment, supporting evidence, assumptions, and decision-relevant contributions. Then compare the responses against the user's constraints, resolve material conflicts, and form your recommendation. Counts and self-reported confidence do not replace evidence. Address any minority opinion that identifies a potentially decisive risk. If that risk cannot be verified, preserve the uncertainty or make the recommendation conditional.
-
-Verify decision-changing evidence before relying on it. Require sources for new findings. If councillors share a model, do not present their agreement as independent verification; state this limitation briefly in the consensus summary. Never present your own reasoning as a councillor's opinion; re-dispatch only when the user asks to consult them again.
+Re-dispatch only when the user asks to consult the councillors again.
 
 The Council request ends when the report is delivered. Council itself does not authorize implementation or other actions; subsequent work follows existing user instructions and authorization. Do not change Orchestrator or Goal state because of this Council.
 

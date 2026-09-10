@@ -100,7 +100,7 @@ The effective state priority is: the latest explicit state in the current sessio
 /council doctor
 ```
 
-The command reads the roster from `<config-root>/council.json` (re-read on every invocation, so edits take effect without a reload) and injects a council instruction. The session agent acts as the synthesizer: it assembles one shared fact pack, dispatches every councillor in parallel in the foreground, and adjudicates a single report:
+The command reads the roster from `<config-root>/council.json` (re-read on every invocation, so edits take effect without a reload) and injects a council instruction. The session agent acts as the synthesizer: it assembles one shared information pack, dispatches every councillor in parallel in the foreground, and adjudicates a single report:
 
 1. **Council conclusion** — the synthesizer's adjudicated recommendation (the council advises; the synthesizer decides);
 2. **Consensus summary** — agreement, disagreement with resolution rationale, remaining uncertainty, and a rating of `unanimous` / `majority` / `split` / `insufficient` counted over valid responses only, with the denominator;

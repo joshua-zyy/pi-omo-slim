@@ -100,7 +100,7 @@ node scripts/install.mjs apply --plan <absolute-plan.json> --sha256 <approved-pl
 /council doctor
 ```
 
-命令读取 `<config-root>/council.json` 中的名单（每次调用都重新读取，改配置无需 reload），注入一条 council 指令。主会话作为综合者：组装一份共享事实包，前台并行派发全部议员，然后裁决出一份报告：
+命令读取 `<config-root>/council.json` 中的名单（每次调用都重新读取，改配置无需 reload），注入一条 council 指令。主会话作为综合者：组装一份共享信息包，前台并行派发全部议员，然后裁决出一份报告：
 
 1. **Council 结论** —— 综合者裁决后的推荐（council 提供建议，裁决权在综合者）；
 2. **共识摘要** —— 一致点、分歧点及裁决理由、剩余不确定性，以及 `unanimous` / `majority` / `split` / `insufficient` 共识度评级（仅按有效回应计数，并注明分母）；
