@@ -97,15 +97,19 @@ The extension also audits every agent's `ext:` tool selectors against the tools 
 
 ### Lane board
 
-`/lanes` shows a live board of the specialist lanes dispatched in this pi process: each top-level subagent's role, status, elapsed time, objective, steer count, and a token/result summary. It works whether Orchestrator Mode is on or off, and `/orchestrator doctor` includes a one-line lane summary.
+`/lanes` shows an on-demand snapshot of observed top-level subagent events: full agent ID, role, event status, elapsed time, objective, steer count, and token/result summary. It works whether Orchestrator Mode is on or off, and `/orchestrator doctor` includes an event-state summary. A same-ID resume starts a new observed run; the board replaces the previous run's timing, result, error and steer count.
 
-The board is a read-only observer built on pi-subagents' lifecycle events; it never spawns, steers, or consumes agents. At render time every still-open lane is cross-checked against pi-subagents' live agent registry, so a lane that ended without a terminal event — a stopped or evicted run — is flagged instead of waiting forever. A finished lane whose result was already fetched via `get_subagent_result` is marked as such, which explains a missing completion notification.
+The board is a read-only observer built on pi-subagents' lifecycle events; it never spawns, steers, or consumes agents. The displayed states and counts come from events. At render time, registry disagreements are shown separately rather than silently rewriting event history. An unavailable registry, a failed lookup, an invalid record and a missing agent record are distinct unknown-state observations, not proof that execution stopped.
+
+A terminal registry record may carry a notification-consumption marker. Foreground inline delivery, `get_subagent_result` and RPC consumption can all set it. It is **not acceptance**, does not identify the delivery path, and does not prove a notification was never sent. Absence of the marker does not prove the result was ignored.
 
 Boundaries, stated honestly:
 
-- The board is process- and activation-scoped: it starts empty when the session starts and does not rehydrate history from earlier sessions.
+- This is an on-demand inspection command, **not a stalled-agent detector**: an agent still registered as running may be making progress or may be stuck. There is no heartbeat, deadline, automatic wake, cancellation or redispatch.
+- This phase does not inject board state into model context, so it does not by itself solve the Orchestrator's bookkeeping after compaction.
+- Each extension activation starts with an empty board. It keeps the latest observed run per ID in memory, does not rehydrate earlier history, and does not reconstruct a separate board for `/tree` branches. Event subscriptions start at `session_start` and are removed at `session_shutdown`.
 - Nested subagents and a workflow's children emit no lifecycle events and stay invisible; they report through their owner.
-- pi-subagents evicts finished agent records roughly ten minutes after completion, so the "result fetched" marker is only readable while the record lives.
+- pi-subagents may evict finished agent records; the notification-consumption marker is only readable while the record lives. The command uses Pi's notification UI and produces no display in print/JSON modes.
 
 ## Council
 

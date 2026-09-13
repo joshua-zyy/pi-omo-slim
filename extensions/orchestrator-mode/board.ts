@@ -1,31 +1,14 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 /**
- * The lane board: a read-only view of top-level pi-subagents activity.
+ * Read-only, per-activation history of top-level pi-subagents lifecycle events.
+ * `/lanes` displays event states alongside on-demand registry observations.
+ * A missing/unavailable registry is uncertainty, not proof a run has stopped.
+ * This module neither detects stalled work nor supplies state to the model.
  *
- * It subscribes to the lifecycle events pi-subagents emits on the shared
- * `pi.events` bus (`subagents:created` / `:started` / `:completed` / `:failed`
- * / `:steered`) and renders them as `/lanes`. The board never spawns, steers,
- * or consumes anything — it is an observer, so upstream changes to dispatch
- * cannot conflict with it.
- *
- * Two sources with distinct authorities:
- *
- * - The event bus builds the board's history. Events carry no session id, so
- *   the board is a per-activation, process-local view: each session activation
- *   (including every child subagent session, which also loads extensions)
- *   gets its own board instance. Duplicate child boards are accepted — they
- *   are never rendered — and every board unsubscribes on session_shutdown.
- * - The `Symbol.for("pi-subagents:manager")` in-process registry is the
- *   liveness authority at render time. A lane the board still shows as active
- *   but the registry cannot produce (evicted, or already terminal) is exactly
- *   the "execution ended without a terminal event" case worth surfacing.
- *
- * Known limits, accepted for this slice: nested subagents emit no events and
- * stay invisible (they report through their owner); records are evicted
- * roughly ten minutes after completion, so `resultConsumed` is only readable
- * while the record lives; the board starts empty and does not rehydrate from
- * the `subagents:record` session entries pi-subagents persists.
+ * A resumed in-memory agent reuses its ID. We retain the latest observed run
+ * for each ID, not a history of all its runs. Nested/workflow-owned agents emit
+ * no lifecycle events. No history is rehydrated after reload or session change.
  */
 
 const MANAGER_KEY = Symbol.for("pi-subagents:manager");
@@ -78,9 +61,14 @@ type Lane = {
 
 /** The subset of the registry's AgentRecord the board reads. */
 type RegistryRecord = {
-	status?: unknown;
+	status: LaneStatus;
 	resultConsumed?: unknown;
 };
+
+// Preserve why a lookup could not establish a current status.
+type RegistryObservation =
+	| { kind: "record"; record: RegistryRecord }
+	| { kind: "unavailable" | "missing" | "error" | "invalid" };
 
 type ManagerRegistry = {
 	getRecord?: (id: string) => unknown;
@@ -103,7 +91,7 @@ function managerRegistry(): ManagerRegistry | undefined {
 // degrade the board's display, never break the session.
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
-	return typeof value === "object" && value !== null
+	return typeof value === "object" && value !== null && !Array.isArray(value)
 		? (value as Record<string, unknown>)
 		: undefined;
 }
@@ -113,7 +101,9 @@ function asString(value: unknown): string | undefined {
 }
 
 function asNumber(value: unknown): number | undefined {
-	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+	return typeof value === "number" && Number.isFinite(value) && value >= 0
+		? value
+		: undefined;
 }
 
 /** First non-empty line, whitespace-collapsed, truncated with an ellipsis. */
@@ -161,22 +151,27 @@ export type LaneBoard = {
 };
 
 export type BoardOptions = {
-	/**
-	 * Overrides the default registry lookup. The default reads
-	 * `Symbol.for("pi-subagents:manager")` from globalThis and returns
-	 * undefined for anything absent or throwing — the board must survive a
-	 * foreign in-process interface changing shape underneath it.
-	 */
-	registryLookup?: (id: string) => RegistryRecord | undefined;
+	/** Read-only observation source; tests can supply a registry without Pi. */
+	registryLookup?: (id: string) => RegistryObservation;
 };
 
-function lookupRegistryRecord(id: string): RegistryRecord | undefined {
-	const registry = managerRegistry();
-	if (typeof registry?.getRecord !== "function") return undefined;
+function lookupRegistryRecord(id: string): RegistryObservation {
 	try {
-		return asRecord(registry.getRecord(id));
+		const registry = managerRegistry();
+		if (typeof registry?.getRecord !== "function") return { kind: "unavailable" };
+		const raw = registry.getRecord(id);
+		if (raw === undefined) return { kind: "missing" };
+		const record = asRecord(raw);
+		const status = asString(record?.status);
+		if (!record || !status || !Object.hasOwn(STATUS_ICONS, status)) {
+			return { kind: "invalid" };
+		}
+		return {
+			kind: "record",
+			record: { status: status as LaneStatus, resultConsumed: record.resultConsumed },
+		};
 	} catch {
-		return undefined;
+		return { kind: "error" };
 	}
 }
 
@@ -215,18 +210,25 @@ export function createBoard(options: BoardOptions = {}): LaneBoard {
 	}
 
 	function onCreated(id: string, type?: string, description?: string): void {
-		// `created` fires for a fresh background spawn and for a detached
-		// resume. For an already-tracked lane it only fills gaps: the status
-		// is owned by started/completed/failed and must never regress here.
-		ensureLane(id, type, description);
+		const lane = ensureLane(id, type, description);
+		if (!TERMINAL_STATUSES.has(lane.status)) return;
+		// A queued resume emits created before started; an immediate resume
+		// emits created after started (and can already have failed by then).
+		// For an existing terminal lane, require a live record to disambiguate.
+		const observation = lookup(id);
+		if (observation.kind !== "record" || TERMINAL_STATUSES.has(observation.record.status)) return;
+		lanes.delete(id);
+		const resumed = ensureLane(id, lane.type, lane.description);
+		resumed.status = observation.record.status;
+		if (resumed.status === "running") resumed.startedSeenAt = Date.now();
 	}
 
 	function onStarted(id: string, type?: string, description?: string): void {
-		const lane = ensureLane(id, type, description);
-		// Terminal is final: a started for an already-terminal lane is a late
-		// event for a finished run, not a revival (a resume introduces a new
-		// record, which starts over at created).
-		if (TERMINAL_STATUSES.has(lane.status)) return;
+		let lane = ensureLane(id, type, description);
+		if (TERMINAL_STATUSES.has(lane.status)) {
+			lanes.delete(id);
+			lane = ensureLane(id, lane.type, lane.description);
+		}
 		lane.status = "running";
 		if (lane.startedSeenAt === undefined) lane.startedSeenAt = Date.now();
 	}
@@ -247,23 +249,18 @@ export function createBoard(options: BoardOptions = {}): LaneBoard {
 				? (payloadStatus as LaneStatus)
 				: fallbackStatus;
 		lane.endedAt = Date.now();
-		const duration = asNumber(payload.durationMs);
-		if (duration !== undefined) lane.durationMs = duration;
-		const tokens = asRecord(payload.tokens);
-		const total = asNumber(tokens?.total);
-		if (total !== undefined) lane.tokensTotal = total;
-		const result = firstLine(asString(payload.result), 40);
-		if (result) lane.resultPreview = result;
-		const error = firstLine(asString(payload.error), 40);
-		if (error) lane.error = error;
+		lane.durationMs = asNumber(payload.durationMs);
+		lane.tokensTotal = asNumber(asRecord(payload.tokens)?.total);
+		lane.resultPreview = firstLine(asString(payload.result), 40);
+		lane.error = firstLine(asString(payload.error), 40);
 	}
 
 	function onSteered(id: string): void {
 		// A steer can reference an agent the board never saw (RPC, scheduler,
 		// or @handle spawns are first visible at `started`, and a queued steer
 		// fires before the agent runs). The lane is created so the steering is
-		// not silently dropped; the render-time registry cross-check corrects
-		// an inaccurate status. The steer text itself stays in the parent
+		// not silently dropped; the render-time registry cross-check reports
+		// any status disagreement. The steer text itself stays in the parent
 		// conversation — the board records only that it happened.
 		ensureLane(id).steers += 1;
 	}
@@ -296,34 +293,29 @@ export function createBoard(options: BoardOptions = {}): LaneBoard {
 		}
 	}
 
-	/**
-	 * Cross-check one lane against the registry. Only disagrees with the
-	 * board's own status when the disagreement is informative: an active lane
-	 * the registry cannot confirm, either direction of a terminal/active
-	 * mismatch, or a terminal record whose result nobody fetched.
-	 */
+	/** Compare observations without treating notification consumption as acceptance. */
 	function laneAnnotations(lane: Lane): string[] {
 		const notes: string[] = [];
 		const boardTerminal = TERMINAL_STATUSES.has(lane.status);
-		const record = lookup(lane.id);
+		const observation = lookup(lane.id);
 
-		if (record === undefined) {
+		if (observation.kind !== "record") {
 			if (!boardTerminal) {
-				notes.push("⚠ no live record — finished or evicted without a terminal event");
+				const reason = {
+					unavailable: "registry unavailable",
+					missing: "agent record not found",
+					error: "registry lookup failed",
+					invalid: "invalid registry record",
+				}[observation.kind];
+				notes.push(`⚠ status unknown: ${reason}`);
 			}
 		} else {
-			const registryStatus = asString(record.status);
-			if (registryStatus && !boardTerminal && TERMINAL_STATUSES.has(registryStatus)) {
-				notes.push(`⚠ registry says ${registryStatus}; terminal event not seen`);
-			} else if (
-				registryStatus &&
-				boardTerminal &&
-				!TERMINAL_STATUSES.has(registryStatus)
-			) {
-				notes.push(`⚠ registry says ${registryStatus} — resumed?`);
+			const record = observation.record;
+			if (record.status !== lane.status) {
+				notes.push(`⚠ registry says ${record.status}; event state is ${lane.status}`);
 			}
-			if (boardTerminal && record.resultConsumed === true) {
-				notes.push("result fetched via get_subagent_result");
+			if (boardTerminal && TERMINAL_STATUSES.has(record.status) && record.resultConsumed === true) {
+				notes.push("notification consumption recorded (not acceptance)");
 			}
 		}
 
@@ -344,7 +336,7 @@ export function createBoard(options: BoardOptions = {}): LaneBoard {
 		const finished = list.filter((lane) => TERMINAL_STATUSES.has(lane.status));
 
 		const lines = [
-			`lane board: ${list.length} tracked — ${active.length} active, ${finished.length} finished`,
+			`lane board: ${list.length} tracked — ${active.length} active, ${finished.length} finished (event states)`,
 			"",
 		];
 
@@ -352,7 +344,7 @@ export function createBoard(options: BoardOptions = {}): LaneBoard {
 			const icon = STATUS_ICONS[lane.status];
 			const elapsed = laneElapsed(lane, now);
 			const elapsedText = elapsed === undefined ? "  ?  " : formatDuration(elapsed).padStart(5);
-			const head = `  ${truncate(lane.type, 12).padEnd(12)} ${icon} ${lane.status.padEnd(9)} ${elapsedText}  ${truncate(lane.description, 44)}`;
+			const head = `  [${lane.id}] ${truncate(lane.type, 12).padEnd(12)} ${icon} ${lane.status.padEnd(9)} ${elapsedText}  ${truncate(lane.description, 44)}`;
 			const notes = laneAnnotations(lane);
 			lines.push(notes.length ? `${head}  · ${notes.join(" · ")}` : head);
 		}
@@ -365,7 +357,7 @@ export function createBoard(options: BoardOptions = {}): LaneBoard {
 		const active = [...lanes.values()].filter(
 			(lane) => !TERMINAL_STATUSES.has(lane.status),
 		).length;
-		return `lane board: ${lanes.size} lane(s) tracked — ${active} active, ${lanes.size - active} finished`;
+		return `lane board: ${lanes.size} lane(s) tracked — ${active} active, ${lanes.size - active} finished (event states)`;
 	}
 
 	return { handleEvent, size: () => lanes.size, render, summarize };
@@ -388,14 +380,18 @@ const BOARD_CHANNELS = [
 export function registerBoard(pi: ExtensionAPI): { summarize: () => string } {
 	const board = createBoard();
 
-	const unsubscribers = BOARD_CHANNELS.map((channel) =>
-		pi.events.on(channel, (data) => board.handleEvent(channel, data)),
-	);
-	// Child sessions load extensions too, so each spawned subagent creates a
-	// board instance; session_shutdown is where those duplicates let go of the
-	// process-wide bus.
+	let unsubscribers: Array<() => void> = [];
+	// Factories may run for extensions that are later filtered out. Only a
+	// bound session should own bus subscriptions, and rebinding is idempotent.
+	pi.on("session_start", async () => {
+		if (unsubscribers.length) return;
+		unsubscribers = BOARD_CHANNELS.map((channel) =>
+			pi.events.on(channel, (data) => board.handleEvent(channel, data)),
+		);
+	});
 	pi.on("session_shutdown", async () => {
 		for (const unsubscribe of unsubscribers) unsubscribe();
+		unsubscribers = [];
 	});
 
 	pi.registerCommand("lanes", {

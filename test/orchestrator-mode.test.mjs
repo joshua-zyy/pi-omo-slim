@@ -58,7 +58,9 @@ function createHarness(initialBranch = [], tools = ["alpha", "beta"]) {
   const busHandlers = new Map();
   const pi = {
     on(event, handler) {
-      handlers.set(event, handler);
+      const list = handlers.get(event) ?? [];
+      list.push(handler);
+      handlers.set(event, list);
     },
     events: {
       on(channel, handler) {
@@ -96,16 +98,27 @@ function createHarness(initialBranch = [], tools = ["alpha", "beta"]) {
 
   orchestratorModeExtension(pi);
 
+  async function emit(event, payload = {}) {
+    let result;
+    for (const handler of handlers.get(event) ?? []) {
+      const next = await handler(payload, context);
+      if (next !== undefined) result = next;
+    }
+    return result;
+  }
+
   return {
     branch,
     context,
     notifications,
     command: (args) => commands.get("orchestrator").handler(args, context),
+    lanes: () => commands.get("lanes").handler("", context),
+    emitBus: (channel, data) => pi.events.emit(channel, data),
     hasCommand: (name) => commands.has(name),
-    beforeAgentStart: (systemPrompt = "BASE") =>
-      handlers.get("before_agent_start")({ systemPrompt }, context),
-    start: () => handlers.get("session_start")({}, context),
-    agentStart: () => handlers.get("agent_start")({}, context),
+    beforeAgentStart: (systemPrompt = "BASE") => emit("before_agent_start", { systemPrompt }),
+    start: () => emit("session_start"),
+    agentStart: () => emit("agent_start"),
+    shutdown: () => emit("session_shutdown"),
   };
 }
 
@@ -268,4 +281,19 @@ test("the /council command is registered alongside /orchestrator", async () => {
 
   assert.ok(harness.hasCommand("council"));
   assert.ok(harness.hasCommand("orchestrator"));
+});
+
+test("board lifecycle coexists with mode restoration, doctor and shutdown", async () => {
+  const harness = createHarness();
+  await harness.start();
+  assert.ok(harness.hasCommand("lanes"));
+  harness.emitBus("subagents:started", { id: "live-1", type: "fixer", description: "integration" });
+  await harness.lanes();
+  assert.match(harness.notifications.at(-1).message, /live-1/);
+  await harness.command("doctor");
+  assert.match(harness.notifications.at(-1).message, /lane board: 1 lane\(s\) tracked — 1 active/);
+  await harness.shutdown();
+  harness.emitBus("subagents:started", { id: "after-shutdown", type: "fixer", description: "not tracked" });
+  await harness.lanes();
+  assert.doesNotMatch(harness.notifications.at(-1).message, /after-shutdown/);
 });

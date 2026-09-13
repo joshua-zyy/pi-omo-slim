@@ -59,6 +59,7 @@ function createHarness(options = {}) {
 		bus,
 		notifications,
 		command: (args = "") => commands.get("lanes").handler(args, context),
+		start: () => piHandlers.get("session_start")({}, context),
 		shutdown: () => piHandlers.get("session_shutdown")({}, context),
 	};
 }
@@ -147,14 +148,58 @@ test("completed with an unknown status string falls back to completed", () => {
 	assert.match(board.render(Date.now()), /✓ completed/);
 });
 
-test("a late started for a terminal lane does not revive it", () => {
-	const board = createBoard();
-	feed(board, "subagents:started", { id: "a1", type: "fixer", description: "d" });
-	feed(board, "subagents:completed", { id: "a1", status: "completed", durationMs: 100 });
-	feed(board, "subagents:started", { id: "a1", type: "fixer", description: "d" });
-	const text = board.render(Date.now());
-	assert.match(text, /0 active, 1 finished/);
-	assert.match(text, /✓ completed/);
+test("same-ID immediate resume resets the run; created after started does not requeue it", (t) => {
+	let clock = 1_000_000;
+	t.mock.method(Date, "now", () => clock);
+	const board = createBoard({ registryLookup: () => ({ kind: "record", record: { status: "running" } }) });
+	const agent = { id: "a1", type: "fixer", description: "retry" };
+	feed(board, "subagents:started", agent);
+	feed(board, "subagents:steered", { id: "a1" });
+	feed(board, "subagents:failed", { ...agent, status: "error", durationMs: 100, error: "old error", result: "old result", tokens: { total: 1234 } });
+	clock += 60_000;
+	// pi-subagents startResume emits started before resumeDetached emits created.
+	feed(board, "subagents:started", agent);
+	feed(board, "subagents:created", agent);
+	clock += 5_000;
+	const text = board.render(clock);
+	assert.match(text, /1 active, 0 finished/);
+	assert.match(text, /● running\s+5s/);
+	assert.doesNotMatch(text, /old error|old result|1\.2k tok|steered ×1|⚠/);
+	assert.match(board.summarize(), /1 active, 0 finished/);
+	feed(board, "subagents:completed", { ...agent, status: "completed", result: "retry succeeded", durationMs: 5000 });
+	assert.match(board.render(clock), /retry succeeded/);
+	assert.doesNotMatch(board.render(clock), /old error|old result/);
+});
+
+test("same-ID queued resume clears old data and preserves steering received in the queue", (t) => {
+	let clock = 1_000_000;
+	t.mock.method(Date, "now", () => clock);
+	let status = "queued";
+	const board = createBoard({ registryLookup: () => ({ kind: "record", record: { status } }) });
+	const agent = { id: "q1", type: "fixer", description: "queued retry" };
+	feed(board, "subagents:completed", { ...agent, durationMs: 1000, result: "old result" });
+	clock += 60_000;
+	feed(board, "subagents:created", agent);
+	assert.match(board.render(clock), /○ queued/);
+	assert.doesNotMatch(board.render(clock), /old result/);
+	feed(board, "subagents:steered", { id: agent.id });
+	clock += 5_000;
+	status = "running";
+	feed(board, "subagents:started", agent);
+	clock += 3_000;
+	feed(board, "subagents:started", agent); // duplicate must not restart the clock
+	assert.match(board.render(clock), /● running\s+3s/);
+	assert.match(board.render(clock), /steered ×1/);
+});
+
+test("created arriving after a fast terminal result does not invent another run", () => {
+	const board = createBoard({ registryLookup: () => ({ kind: "record", record: { status: "error" } }) });
+	const agent = { id: "fast", type: "fixer", description: "startup error" };
+	feed(board, "subagents:started", agent);
+	feed(board, "subagents:failed", { ...agent, status: "error", error: "startup failed" });
+	feed(board, "subagents:created", agent);
+	assert.match(board.render(Date.now()), /0 active, 1 finished/);
+	assert.match(board.render(Date.now()), /startup failed/);
 });
 
 test("steers are counted, including for agents the board never saw", () => {
@@ -200,49 +245,82 @@ test("elapsed falls back to local clock difference when durationMs is absent", (
 	}
 });
 
-test("liveness cross-check against the registry", () => {
+test("registry observations distinguish mismatches, missing records and notification consumption", () => {
 	const records = new Map();
-	const board = createBoard({ registryLookup: (id) => records.get(id) });
+	const board = createBoard({ registryLookup: (id) => records.has(id)
+		? { kind: "record", record: records.get(id) }
+		: { kind: "missing" } });
 	feed(board, "subagents:started", { id: "r1", type: "oracle", description: "review plan" });
-
-	// Board running, registry agrees: no warning.
 	records.set("r1", { status: "running" });
-	let text = board.render(Date.now());
-	assert.doesNotMatch(text, /⚠/);
-
-	// Board running, registry already terminal: the terminal event was missed.
+	assert.doesNotMatch(board.render(Date.now()), /⚠/);
 	records.set("r1", { status: "stopped" });
-	text = board.render(Date.now());
-	assert.match(text, /⚠ registry says stopped; terminal event not seen/);
-
-	// Board running, no record at all: evicted or gone without a terminal event.
+	assert.match(board.render(Date.now()), /registry says stopped; event state is running/);
 	records.delete("r1");
-	text = board.render(Date.now());
-	assert.match(text, /⚠ no live record/);
-
-	// Board terminal, registry running again: a resumed run the events did not
-	// re-introduce (a resume starts a new record).
+	assert.match(board.render(Date.now()), /status unknown: agent record not found/);
+	assert.doesNotMatch(board.render(Date.now()), /finished or evicted/);
 	feed(board, "subagents:completed", { id: "r1", status: "completed", durationMs: 1000 });
 	records.set("r1", { status: "running" });
-	text = board.render(Date.now());
-	assert.match(text, /⚠ registry says running — resumed\?/);
-
-	// Board terminal, registry terminal, result fetched by the parent tool:
-	// surfaced so a missing completion notification is explainable.
+	assert.match(board.render(Date.now()), /registry says running; event state is completed/);
+	// Foreground inline results and RPC consume also set this flag. It does
+	// not establish a particular delivery path, notification history or acceptance.
 	records.set("r1", { status: "completed", resultConsumed: true });
-	text = board.render(Date.now());
+	const text = board.render(Date.now());
 	assert.doesNotMatch(text, /⚠/);
-	assert.match(text, /result fetched via get_subagent_result/);
+	assert.match(text, /notification consumption recorded \(not acceptance\)/);
+	assert.doesNotMatch(text, /get_subagent_result|result fetched|notification was suppressed/);
+	assert.equal(records.get("r1").resultConsumed, true);
+	records.set("r1", { status: "completed", resultConsumed: false });
+	assert.doesNotMatch(board.render(Date.now()), /not read|unreviewed|unconsumed/);
 });
 
-test("liveness annotations need no registry at all", () => {
-	const board = createBoard({ registryLookup: () => undefined });
-	feed(board, "subagents:started", { id: "a1", type: "fixer", description: "d" });
-	assert.match(board.render(Date.now()), /⚠ no live record/);
+test("default registry lookup distinguishes unavailable, missing, failed and invalid observations", (t) => {
+	const saved = Object.getOwnPropertyDescriptor(globalThis, MANAGER_KEY);
+	t.after(() => {
+		if (saved) Object.defineProperty(globalThis, MANAGER_KEY, saved);
+		else delete globalThis[MANAGER_KEY];
+	});
+	const cases = [
+		[undefined, /registry unavailable/],
+		[{}, /registry unavailable/],
+		[{ getRecord: () => undefined }, /agent record not found/],
+		[{ getRecord: () => { throw new Error("boom"); } }, /registry lookup failed/],
+		[{ getRecord: () => [] }, /invalid registry record/],
+		[{ getRecord: () => ({ status: "future-status" }) }, /invalid registry record/],
+	];
+	for (const [registry, expected] of cases) {
+		globalThis[MANAGER_KEY] = registry;
+		const board = createBoard();
+		feed(board, "subagents:started", { id: "a1", type: "fixer", description: "d" });
+		const text = board.render(Date.now());
+		assert.match(text, /status unknown/);
+		assert.match(text, expected);
+		assert.doesNotMatch(text, /finished or evicted|registry says stopped/);
+	}
+});
+
+test("each displayed lane includes its full ID even with duplicate role and objective", () => {
+	const board = createBoard();
+	for (const id of ["same-prefix-one", "same-prefix-two"]) {
+		feed(board, "subagents:started", { id, type: "fixer", description: "same objective" });
+	}
+	const text = board.render(Date.now());
+	assert.match(text, /same-prefix-one/);
+	assert.match(text, /same-prefix-two/);
+});
+
+test("an old running registration is not diagnosed as a stuck or stopped agent", () => {
+	const board = createBoard({ registryLookup: () => ({ kind: "record", record: { status: "running" } }) });
+	feed(board, "subagents:started", { id: "long", type: "fixer", description: "long task" });
+	const text = board.render(Date.now() + 86_400_000);
+	assert.match(text, /1 active, 0 finished/);
+	assert.doesNotMatch(text, /⚠|stuck|stopped/);
 });
 
 test("registerBoard wires the /lanes command to the bus", async () => {
 	const harness = createHarness();
+	assert.equal(harness.bus.subscriberCount("subagents:started"), 0);
+	await harness.start();
+	await harness.start(); // lifecycle rebind must not double-subscribe
 	assert.equal(harness.bus.subscriberCount("subagents:started"), 1);
 	assert.equal(harness.bus.subscriberCount("subagents:steered"), 1);
 
@@ -275,8 +353,13 @@ test("empty board with no Agent tool and no registry explains the absence", asyn
 
 test("session_shutdown unsubscribes the board from the bus", async () => {
 	const harness = createHarness();
+	await harness.start();
 	assert.equal(harness.bus.subscriberCount("subagents:completed"), 1);
+	await harness.shutdown();
 	await harness.shutdown();
 	assert.equal(harness.bus.subscriberCount("subagents:completed"), 0);
 	assert.equal(harness.bus.subscriberCount("subagents:started"), 0);
+	await harness.start();
+	assert.equal(harness.bus.subscriberCount("subagents:started"), 1);
+	await harness.shutdown();
 });
