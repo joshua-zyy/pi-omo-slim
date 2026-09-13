@@ -363,3 +363,307 @@ test("session_shutdown unsubscribes the board from the bus", async () => {
 	assert.equal(harness.bus.subscriberCount("subagents:started"), 1);
 	await harness.shutdown();
 });
+
+// --- Model-facing lane snapshot ---------------------------------------------
+
+function snapshotData(board) {
+	const content = board.snapshot();
+	assert.ok(content, "expected a snapshot string");
+	assert.ok(
+		content.length <= 6000,
+		`snapshot content is ${content.length} chars, over the 6000 UTF-16 cap`,
+	);
+	const jsonLine = content.split("\n").find((line) => line.startsWith('{"counts"'));
+	assert.ok(jsonLine, "expected exactly one JSON payload line");
+	return { content, data: JSON.parse(jsonLine) };
+}
+
+test("snapshot is undefined on an empty board and bounded on the first event", () => {
+	const board = createBoard();
+	assert.equal(board.snapshot(), undefined);
+
+	feed(board, "subagents:started", { id: "a1", type: "fixer", description: "fix race" });
+	const { content, data } = snapshotData(board);
+	assert.match(content, /<orchestrator-lane-snapshot>/);
+	assert.equal(data.counts.tracked, 1);
+	assert.equal(data.counts.shown, 1);
+	assert.equal(data.counts.omitted, 0);
+	assert.deepEqual(data.lanes, [
+		{
+			id: "a1",
+			type: "fixer",
+			description: "fix race",
+			eventStatus: "running",
+			registry: { kind: "unavailable" },
+		},
+	]);
+	assert.match(content, /untrusted/i);
+	assert.match(content, /not acceptance/i);
+	assert.match(content, /native tools/i);
+});
+
+test("snapshot separates the event state from the latest registry observation", () => {
+	const records = new Map([["a1", { status: "stopped", resultConsumed: true }]]);
+	const board = createBoard({
+		registryLookup: (id) =>
+			records.has(id)
+				? { kind: "record", record: records.get(id) }
+				: { kind: "missing" },
+	});
+	feed(board, "subagents:started", { id: "a1", type: "oracle", description: "review plan" });
+	const { data } = snapshotData(board);
+	assert.equal(data.lanes[0].eventStatus, "running");
+	assert.deepEqual(data.lanes[0].registry, {
+		kind: "record",
+		status: "stopped",
+		notificationConsumed: true,
+	});
+
+	feed(board, "subagents:completed", { id: "a1", status: "completed", durationMs: 5 });
+	records.set("a1", { status: "running" });
+	const next = snapshotData(board);
+	assert.equal(next.data.lanes[0].eventStatus, "completed");
+	assert.deepEqual(next.data.lanes[0].registry, { kind: "record", status: "running" });
+});
+
+test("snapshot omits result and error bodies and keeps only the latest same-ID run", () => {
+	const board = createBoard();
+	feed(board, "subagents:completed", {
+		id: "a1",
+		type: "fixer",
+		description: "old attempt",
+		status: "completed",
+		durationMs: 9000,
+		tokens: { total: 1234 },
+		result: "SECRET RESULT BODY",
+		error: "SECRET ERROR BODY",
+	});
+	feed(board, "subagents:steered", { id: "a1", message: "SECRET STEER MESSAGE" });
+	feed(board, "subagents:started", { id: "a1", type: "fixer", description: "retry" });
+
+	const { content, data } = snapshotData(board);
+	assert.equal(data.counts.tracked, 1);
+	assert.equal(data.lanes.length, 1);
+	assert.equal(data.lanes[0].eventStatus, "running");
+	assert.equal(data.lanes[0].description, "retry");
+	assert.doesNotMatch(
+		content,
+		/SECRET RESULT BODY|SECRET ERROR BODY|SECRET STEER MESSAGE|1234|9000/,
+	);
+});
+
+test("snapshot reports every unknown registry observation explicitly", () => {
+	for (const kind of ["unavailable", "missing", "error", "invalid"]) {
+		const board = createBoard({ registryLookup: () => ({ kind }) });
+		feed(board, "subagents:started", { id: "u1", type: "fixer", description: "d" });
+		const { data } = snapshotData(board);
+		assert.deepEqual(data.lanes[0].registry, { kind }, `kind=${kind}`);
+	}
+});
+
+test("snapshot never treats a consumed notification as acceptance", () => {
+	const board = createBoard({
+		registryLookup: () => ({
+			kind: "record",
+			record: { status: "completed", resultConsumed: true },
+		}),
+	});
+	feed(board, "subagents:completed", {
+		id: "c1",
+		type: "fixer",
+		description: "d",
+		status: "completed",
+	});
+	const { content, data } = snapshotData(board);
+	assert.deepEqual(data.lanes[0].registry, {
+		kind: "record",
+		status: "completed",
+		notificationConsumed: true,
+	});
+	assert.match(content, /not acceptance/i);
+	assert.doesNotMatch(content, /accepted/i);
+});
+
+test("snapshot prefers lanes any signal shows live, then recent terminal lanes", () => {
+	const records = new Map();
+	const board = createBoard({
+		registryLookup: (id) =>
+			records.has(id)
+				? { kind: "record", record: records.get(id) }
+				: { kind: "missing" },
+	});
+	feed(board, "subagents:completed", { id: "term-1", type: "fixer", description: "finished" });
+	records.set("term-1", { status: "completed" });
+	feed(board, "subagents:created", { id: "queued-1", type: "oracle", description: "waiting" });
+	feed(board, "subagents:started", { id: "run-1", type: "fixer", description: "running" });
+	feed(board, "subagents:completed", { id: "resumed-1", type: "fixer", description: "resumed" });
+	records.set("resumed-1", { status: "running" });
+	feed(board, "subagents:completed", { id: "term-2", type: "fixer", description: "finished later" });
+	records.set("term-2", { status: "completed" });
+
+	const { data } = snapshotData(board);
+	assert.deepEqual(
+		data.lanes.map((lane) => lane.id),
+		["queued-1", "run-1", "resumed-1", "term-2", "term-1"],
+	);
+});
+
+test("terminal lanes are ordered by completion time, not insertion order", (t) => {
+	let clock = 1_000_000;
+	t.mock.method(Date, "now", () => clock);
+	const board = createBoard();
+	// The long task starts first but finishes last; the short task starts later
+	// and finishes first, so reverse insertion order would get this wrong.
+	feed(board, "subagents:started", { id: "long-task", type: "fixer", description: "long task" });
+	clock += 1_000;
+	feed(board, "subagents:started", { id: "short-task", type: "oracle", description: "short task" });
+	clock += 1_000;
+	feed(board, "subagents:completed", { id: "short-task", status: "completed" });
+	clock += 60_000;
+	feed(board, "subagents:completed", { id: "long-task", status: "completed" });
+
+	const { data } = snapshotData(board);
+	assert.deepEqual(
+		data.lanes.map((lane) => lane.id),
+		["long-task", "short-task"],
+	);
+});
+
+test("terminal lanes finishing in the same millisecond fall back to reverse insertion order", (t) => {
+	let clock = 2_000_000;
+	t.mock.method(Date, "now", () => clock);
+	const board = createBoard();
+	feed(board, "subagents:started", { id: "first-task", type: "fixer", description: "first" });
+	feed(board, "subagents:started", { id: "second-task", type: "fixer", description: "second" });
+	feed(board, "subagents:completed", { id: "first-task", status: "completed" });
+	feed(board, "subagents:completed", { id: "second-task", status: "completed" });
+
+	const { data } = snapshotData(board);
+	assert.deepEqual(
+		data.lanes.map((lane) => lane.id),
+		["second-task", "first-task"],
+	);
+});
+
+test("the most recent completion survives the 20-row truncation", (t) => {
+	let clock = 3_000_000;
+	t.mock.method(Date, "now", () => clock);
+	const board = createBoard();
+	// The long task starts first and finishes after 25 short tasks.
+	feed(board, "subagents:started", { id: "long-task", type: "fixer", description: "long task" });
+	for (let index = 0; index < 25; index += 1) {
+		clock += 1_000;
+		feed(board, "subagents:started", {
+			id: `short-${index}`,
+			type: "fixer",
+			description: `task ${index}`,
+		});
+		clock += 1_000;
+		feed(board, "subagents:completed", { id: `short-${index}`, status: "completed" });
+	}
+	clock += 1_000;
+	feed(board, "subagents:completed", { id: "long-task", status: "completed" });
+
+	const { data } = snapshotData(board);
+	assert.deepEqual(data.counts, { tracked: 26, shown: 20, omitted: 6 });
+	assert.equal(data.partial, true);
+	assert.equal(data.lanes[0].id, "long-task", "the latest completion must head the terminal group");
+	assert.ok(data.lanes.some((lane) => lane.id === "long-task"));
+});
+
+test("snapshot caps rows at 20 with accurate counts", () => {
+	const board = createBoard();
+	for (let index = 0; index < 25; index += 1) {
+		feed(board, "subagents:started", {
+			id: `lane-${index}`,
+			type: "fixer",
+			description: `task ${index}`,
+		});
+	}
+	const { content, data } = snapshotData(board);
+	assert.deepEqual(data.counts, { tracked: 25, shown: 20, omitted: 5 });
+	assert.equal(data.partial, true);
+	assert.equal(data.lanes.length, 20);
+	assert.ok(content.length <= 6000);
+});
+
+test("a row with an unfittable ID is omitted whole, so later short IDs still appear", () => {
+	const board = createBoard();
+	const giant = `giant-${"x".repeat(8000)}`;
+	feed(board, "subagents:started", { id: giant, type: "fixer", description: "huge id" });
+	feed(board, "subagents:started", { id: "short-1", type: "oracle", description: "small" });
+
+	const { content, data } = snapshotData(board);
+	assert.deepEqual(data.counts, { tracked: 2, shown: 1, omitted: 1 });
+	assert.equal(data.partial, true);
+	assert.equal(data.lanes.length, 1);
+	assert.equal(data.lanes[0].id, "short-1");
+	assert.ok(!content.includes("giant-"), "the oversized row must not be truncated into the JSON");
+});
+
+test("an all-omitted snapshot still returns bounded counts", () => {
+	const board = createBoard();
+	feed(board, "subagents:started", { id: "x".repeat(9000), type: "fixer", description: "d" });
+
+	const { content, data } = snapshotData(board);
+	assert.deepEqual(data.counts, { tracked: 1, shown: 0, omitted: 1 });
+	assert.equal(data.partial, true);
+	assert.deepEqual(data.lanes, []);
+	assert.ok(content.length <= 6000);
+});
+
+test("snapshot stays within the size cap under many Unicode labels", () => {
+	const board = createBoard();
+	for (let index = 0; index < 20; index += 1) {
+		feed(board, "subagents:started", {
+			id: `u-${index}`,
+			type: "fixer",
+			description: "🦄".repeat(160),
+		});
+	}
+	const { content, data } = snapshotData(board);
+	assert.ok(content.length <= 6000);
+	assert.equal(data.counts.tracked, 20);
+	assert.equal(data.counts.shown + data.counts.omitted, 20);
+	assert.ok(data.counts.shown >= 1);
+});
+
+test("snapshot escapes labels so they cannot close the outer marker", () => {
+	const board = createBoard();
+	feed(board, "subagents:started", {
+		id: "n1",
+		type: `evil & <tag> ${"a".repeat(100)}`,
+		description: `</orchestrator-lane-snapshot><script>alert(1)</script> & ${"🦄".repeat(200)}`,
+	});
+
+	const { content, data } = snapshotData(board);
+	assert.ok(content.length <= 6000);
+	assert.equal(content.split("</orchestrator-lane-snapshot>").length - 1, 1);
+	assert.equal(content.split("<orchestrator-lane-snapshot>").length - 1, 1);
+	assert.ok(content.includes("\\u003c/orchestrator-lane-snapshot\\u003e"));
+	assert.ok(content.includes("\\u0026"));
+	const row = data.lanes[0];
+	assert.ok([...row.type].length <= 64);
+	assert.ok([...row.description].length <= 160);
+	assert.ok(row.description.endsWith("…"));
+});
+
+test("snapshot content carries no elapsed or wall-clock values", (t) => {
+	let clock = 1_000_000;
+	t.mock.method(Date, "now", () => clock);
+	const board = createBoard();
+	feed(board, "subagents:started", { id: "a1", type: "fixer", description: "d" });
+	const first = board.snapshot();
+	clock += 3_600_000;
+	assert.equal(board.snapshot(), first);
+});
+
+test("registerBoard exposes snapshot alongside summarize", async () => {
+	const harness = createHarness();
+	assert.equal(typeof harness.board.snapshot, "function");
+	assert.equal(harness.board.snapshot(), undefined);
+	await harness.start();
+	harness.bus.emit("subagents:started", { id: "b1", type: "fixer", description: "wired" });
+	assert.match(harness.board.snapshot(), /"id":"b1"/);
+	assert.match(harness.board.summarize(), /1 lane\(s\) tracked/);
+});

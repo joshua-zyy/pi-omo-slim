@@ -12,6 +12,9 @@ import { registerBoard } from "./board.ts";
 const STATE_ENTRY = "orchestrator-mode";
 const GOAL_STATE_ENTRY = "goal-state";
 const STATUS_KEY = "orchestrator-mode";
+// Identifies the bounded lane snapshot this extension appends to the model
+// context, so every later call can replace its own stale copy.
+const LANE_SNAPSHOT_CUSTOM_TYPE = "orchestrator-lane-snapshot";
 const POLICY_PATH = join(
 	dirname(fileURLToPath(import.meta.url)),
 	"orchestrator-policy.md",
@@ -399,6 +402,31 @@ export default function orchestratorModeExtension(pi: ExtensionAPI) {
 		runStartupAudit(ctx);
 	});
 	pi.on("session_tree", async (_event, ctx) => restoreState(ctx));
+
+	// Before each LLM call, replace any older lane snapshot of ours with one
+	// fresh bounded copy appended to the end of the context copy. The mode gate
+	// and the empty-board gate add nothing; our stale snapshots are still
+	// removed, and the input event.messages is never mutated.
+	pi.on("context", async (event) => {
+		const messages = event.messages.filter(
+			(message) =>
+				!(
+					message.role === "custom" &&
+					message.customType === LANE_SNAPSHOT_CUSTOM_TYPE
+				),
+		);
+		const removed = messages.length !== event.messages.length;
+		const snapshot = enabled && loaded.policy ? board.snapshot() : undefined;
+		if (!snapshot) return removed ? { messages } : undefined;
+		messages.push({
+			role: "custom",
+			customType: LANE_SNAPSHOT_CUSTOM_TYPE,
+			content: snapshot,
+			display: false,
+			timestamp: Date.now(),
+		});
+		return { messages };
+	});
 
 	pi.on("before_agent_start", async (event, ctx) => {
 		if (!enabled || !loaded.policy) return;
