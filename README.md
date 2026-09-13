@@ -78,6 +78,7 @@ Each one reports back, confirming the full roster with the Orchestrator ready to
 /orchestrator off      Disable it
 /orchestrator status   Show its current state
 /orchestrator doctor   Diagnose policies, agent files, and tool selectors
+/lanes                 Show tracked specialist lanes (subagent activity board)
 ```
 
 The optional global configuration file is `<config-root>/orchestrator-mode.json`:
@@ -93,6 +94,18 @@ The optional global configuration file is `<config-root>/orchestrator-mode.json`
 The effective state priority is: the latest explicit state in the current session branch, then `defaultEnabled`, then `false`. Consequently, `defaultEnabled: true` enables the mode when Pi opens a new session or switches to a session with no recorded mode state. A session branch that previously ran `/orchestrator on` or `/orchestrator off` retains that explicit state.
 
 The extension also audits every agent's `ext:` tool selectors against the tools the session actually provides. That audit runs once on the first agent turn rather than at session start: extensions such as pi-fff register their tools from their own `session_start` handlers, and auditing earlier false-flags tools that are registered moments later. A genuinely missing tool is reported once as a warning; `/orchestrator doctor` shows the full report on demand.
+
+### Lane board
+
+`/lanes` shows a live board of the specialist lanes dispatched in this pi process: each top-level subagent's role, status, elapsed time, objective, steer count, and a token/result summary. It works whether Orchestrator Mode is on or off, and `/orchestrator doctor` includes a one-line lane summary.
+
+The board is a read-only observer built on pi-subagents' lifecycle events; it never spawns, steers, or consumes agents. At render time every still-open lane is cross-checked against pi-subagents' live agent registry, so a lane that ended without a terminal event — a stopped or evicted run — is flagged instead of waiting forever. A finished lane whose result was already fetched via `get_subagent_result` is marked as such, which explains a missing completion notification.
+
+Boundaries, stated honestly:
+
+- The board is process- and activation-scoped: it starts empty when the session starts and does not rehydrate history from earlier sessions.
+- Nested subagents and a workflow's children emit no lifecycle events and stay invisible; they report through their owner.
+- pi-subagents evicts finished agent records roughly ten minutes after completion, so the "result fetched" marker is only readable while the record lives.
 
 ## Council
 

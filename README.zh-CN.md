@@ -78,6 +78,7 @@ node scripts/install.mjs apply --plan <absolute-plan.json> --sha256 <approved-pl
 /orchestrator off      禁用
 /orchestrator status   显示当前状态
 /orchestrator doctor   诊断策略、agent 文件与工具选择器
+/lanes                 显示专家泳道实况（子代理活动看板）
 ```
 
 可选的全局配置文件为 `<config-root>/orchestrator-mode.json`：
@@ -93,6 +94,18 @@ node scripts/install.mjs apply --plan <absolute-plan.json> --sha256 <approved-pl
 生效状态的优先级为：当前会话分支中最近一次显式状态，其次 `defaultEnabled`，最后 `false`。因此，当 Pi 打开新会话或切换到未记录模式状态的会话时，`defaultEnabled: true` 会启用该模式；而曾执行过 `/orchestrator on` 或 `/orchestrator off` 的会话分支则保留其显式状态。
 
 扩展还会把各 agent 的 `ext:` 工具选择器与会话实际提供的工具做一次审计。该审计在首个 agent 回合运行，而不是会话启动时：pi-fff 等扩展在自身的 `session_start` 处理器里注册工具，过早审计会把稍后才注册的工具误报为缺失。确实缺失的工具只警告一次；`/orchestrator doctor` 可随时查看完整报告。
+
+### 泳道看板
+
+`/lanes` 显示当前 pi 进程中派发的专家泳道实况：每个顶层子代理的角色、状态、耗时、目标、steer 次数，以及 token/结果摘要。无论 Orchestrator Mode 是否开启它都可用；`/orchestrator doctor` 也会包含一行看板概要。
+
+看板是构建在 pi-subagents 生命周期事件之上的只读观察者，从不派发、改道或消费代理。渲染时，每个未终结的泳道会与 pi-subagents 的实时代理注册表交叉核对，因此“执行已结束但终态事件未到达”的泳道（停止或被驱逐的运行）会被标记出来，而不是永远等待。结果已由 `get_subagent_result` 取走的完成泳道也会被标注——这解释了为什么没有出现完成通知。
+
+诚实声明的边界：
+
+- 看板以进程和激活为作用域：会话启动时从空开始，不会从更早的会话重建历史。
+- 嵌套子代理与 workflow 的子代理不产生生命周期事件，保持不可见；它们经由各自的所有者汇报。
+- pi-subagents 在完成约十分钟后驱逐已结束的代理记录，因此“结果已取用”标记只在记录存活期间可读。
 
 ## Council
 

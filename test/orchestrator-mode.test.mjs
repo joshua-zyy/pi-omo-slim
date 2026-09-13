@@ -55,9 +55,25 @@ function createHarness(initialBranch = [], tools = ["alpha", "beta"]) {
   const handlers = new Map();
   const commands = new Map();
   const notifications = [];
+  const busHandlers = new Map();
   const pi = {
     on(event, handler) {
       handlers.set(event, handler);
+    },
+    events: {
+      on(channel, handler) {
+        let list = busHandlers.get(channel);
+        if (!list) busHandlers.set(channel, (list = []));
+        list.push(handler);
+        return () => {
+          const current = busHandlers.get(channel);
+          const index = current ? current.indexOf(handler) : -1;
+          if (index !== -1) current.splice(index, 1);
+        };
+      },
+      emit(channel, data) {
+        for (const handler of [...(busHandlers.get(channel) ?? [])]) handler(data);
+      },
     },
     registerCommand(name, config) {
       commands.set(name, config);

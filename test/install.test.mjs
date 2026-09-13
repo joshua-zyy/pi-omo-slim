@@ -104,6 +104,7 @@ const TARGET_IDS = [
   "extensions/orchestrator-mode/orchestrator-goal-policy.md",
   "extensions/orchestrator-mode/council.ts",
   "extensions/orchestrator-mode/council-policy.md",
+  "extensions/orchestrator-mode/board.ts",
   "orchestrator-mode.json",
   "council.json",
   "subagents.json",
@@ -286,7 +287,7 @@ assert.equal(
 );
 
 // (3) All eight dependencies installed: plan succeeds, plan.pi.dependencies is
-// exactly the fixed eight packages, targets are exactly the current sixteen,
+// exactly the fixed eight packages, targets are exactly the current seventeen,
 // the plan carries schema_version 3, the parsed Pi version (bare output form)
 // with the enforced minimum, and every dependency's installed version.
 const case3Root = join(fixtureRoot, "case3-all-eight");
@@ -333,12 +334,12 @@ assert.deepEqual(
 assert.equal(
   plan.targets.length,
   TARGET_IDS.length,
-  "targets must be exactly the current sixteen",
+  "targets must be exactly the current seventeen",
 );
 assert.deepEqual(
   plan.targets.map((target) => target.id),
   TARGET_IDS,
-  "target IDs must be exactly the current sixteen",
+  "target IDs must be exactly the current seventeen",
 );
 
 // Rebuilds the fake Pi environment from an approved plan so apply re-runs the
@@ -373,7 +374,7 @@ function runApply(planPath, sha256Hex, extraEnv = {}) {
 
 // (4) Apply the case-3 approved plan with the exact SHA from stdout: the
 // install/backup/verification success path must exit 0, write a succeeded
-// result, record a 16-target manifest, and leave exactly the fifteen managed
+// result, record a 17-target manifest, and leave exactly the sixteen managed
 // writes in place — while settings.json (observe-only) is never created.
 const approvedPlan = JSON.parse(readFileSync(planPath, "utf8"));
 const managedTargets = approvedPlan.targets.filter(
@@ -381,8 +382,8 @@ const managedTargets = approvedPlan.targets.filter(
 );
 assert.equal(
   managedTargets.length,
-  15,
-  "fresh-root plan must have exactly fifteen managed targets",
+  16,
+  "fresh-root plan must have exactly sixteen managed targets",
 );
 assert.deepEqual(
   approvedPlan.targets
@@ -422,7 +423,7 @@ assert.equal(
 assert.equal(
   applyResult.operations.length,
   managedTargets.length,
-  "result.json must record exactly the fifteen managed operations",
+  "result.json must record exactly the sixteen managed operations",
 );
 assert.ok(
   applyResult.operations.every((operation) => operation.type === "create"),
@@ -432,7 +433,7 @@ const successManifest = JSON.parse(readFileSync(applyResult.manifest, "utf8"));
 assert.equal(
   successManifest.targets.length,
   TARGET_IDS.length,
-  "manifest must have exactly the current sixteen targets",
+  "manifest must have exactly the current seventeen targets",
 );
 assert.deepEqual(
   successManifest.targets.map((item) => item.id),
@@ -463,6 +464,7 @@ for (const id of [
   "extensions/orchestrator-mode/orchestrator-goal-policy.md",
   "extensions/orchestrator-mode/council.ts",
   "extensions/orchestrator-mode/council-policy.md",
+  "extensions/orchestrator-mode/board.ts",
 ]) {
   const target = managedTargets.find((item) => item.id === id);
   assert.equal(
@@ -518,7 +520,7 @@ assert.equal(
 
 // (5) Injected verification failure: a fresh config root and a fresh
 // one-time plan, applied with PI_OMO_INSTALL_TEST_MODE=1 and
-// PI_OMO_INSTALL_TEST_FAILURE=during_verification. All fifteen managed writes
+// PI_OMO_INSTALL_TEST_FAILURE=during_verification. All sixteen managed writes
 // and the directories created for them must be rolled back exactly as the
 // plan's rollback contract describes, with no unresolved paths, while the
 // audit and backup records are retained and settings.json still never
@@ -543,8 +545,8 @@ const failureManaged = failurePlan.targets.filter(
 );
 assert.equal(
   failureManaged.length,
-  15,
-  "fresh-root plan must have exactly fifteen managed targets",
+  16,
+  "fresh-root plan must have exactly sixteen managed targets",
 );
 assert.equal(
   failurePlan.rollback.delete_files.length,
@@ -666,7 +668,7 @@ const failureManifest = JSON.parse(
 assert.equal(
   failureManifest.targets.length,
   TARGET_IDS.length,
-  "backup manifest must cover all sixteen targets",
+  "backup manifest must cover all seventeen targets",
 );
 assert.ok(
   failureManifest.targets.every((item) => item.existed === false),
@@ -1900,7 +1902,7 @@ for (const [name, text] of [
 
 // Council surface: both READMEs document /council, the council.json roster,
 // and the honest boundary disclosures; INSTALL_AGENT.md carries the v3
-// fourteen-destination/sixteen-target contract and the action-only councillor
+// seventeen-destination/seventeen-target contract and the action-only councillor
 // schema; no document mentions ultrawork (deferred, not shipped here).
 for (const [name, text, boundaryPhrases] of [
   [
@@ -1944,15 +1946,30 @@ for (const [name, text, boundaryPhrases] of [
       `${name} must disclose the ${label}`,
     );
 }
+for (const [name, text] of [
+  ["README.md", docs["README.md"]],
+  ["README.zh-CN.md", docs["README.zh-CN.md"]],
+]) {
+  assert.match(
+    text,
+    /\/lanes/,
+    `${name} must document the /lanes command`,
+  );
+  assert.match(
+    text,
+    name === "README.md" ? /read-only observer/ : /只读观察者/,
+    `${name} must disclose that the lane board is a read-only observer`,
+  );
+}
 assert.match(
   docs["INSTALL_AGENT.md"],
-  /fourteen destinations/,
-  "INSTALL_AGENT.md must list fourteen inspection destinations",
+  /seventeen destinations/,
+  "INSTALL_AGENT.md must list seventeen inspection destinations",
 );
 assert.match(
   docs["INSTALL_AGENT.md"],
-  /sixteen-target `manifest\.json`/,
-  "INSTALL_AGENT.md must describe the sixteen-target manifest",
+  /seventeen-target `manifest\.json`/,
+  "INSTALL_AGENT.md must describe the seventeen-target manifest",
 );
 assert.match(
   docs["INSTALL_AGENT.md"],

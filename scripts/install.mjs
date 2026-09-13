@@ -39,6 +39,7 @@ const TARGET_IDS = [
   "extensions/orchestrator-mode/orchestrator-goal-policy.md",
   "extensions/orchestrator-mode/council.ts",
   "extensions/orchestrator-mode/council-policy.md",
+  "extensions/orchestrator-mode/board.ts",
   "orchestrator-mode.json",
   "council.json",
   "subagents.json",
@@ -782,6 +783,10 @@ function expectedSourceMap(repositoryRoot) {
       ),
     ],
     [
+      "extensions/orchestrator-mode/board.ts",
+      join(repositoryRoot, "extensions/orchestrator-mode/board.ts"),
+    ],
+    [
       "orchestrator-mode.json",
       join(repositoryRoot, "config/orchestrator-mode.json.example"),
     ],
@@ -1402,6 +1407,7 @@ function applyMain(argv) {
       "extensions/orchestrator-mode/orchestrator-goal-policy.md",
       "extensions/orchestrator-mode/council.ts",
       "extensions/orchestrator-mode/council-policy.md",
+      "extensions/orchestrator-mode/board.ts",
     ]) {
       const target = plan.targets.find((item) => item.id === id);
       if (target.may_modify) writeManaged(target, verifiedSources.get(id));
@@ -1491,6 +1497,7 @@ function applyMain(argv) {
       "extensions/orchestrator-mode/orchestrator-goal-policy.md",
       "extensions/orchestrator-mode/council.ts",
       "extensions/orchestrator-mode/council-policy.md",
+      "extensions/orchestrator-mode/board.ts",
     ]) {
       const target = plan.targets.find((item) => item.id === id);
       if (

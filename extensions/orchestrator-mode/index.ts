@@ -7,6 +7,7 @@ import {
 	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { registerCouncil } from "./council.ts";
+import { registerBoard } from "./board.ts";
 
 const STATE_ENTRY = "orchestrator-mode";
 const GOAL_STATE_ENTRY = "goal-state";
@@ -281,6 +282,8 @@ export default function orchestratorModeExtension(pi: ExtensionAPI) {
 			);
 		}
 
+		lines.push(board.summarize());
+
 		return lines;
 	};
 
@@ -369,6 +372,7 @@ export default function orchestratorModeExtension(pi: ExtensionAPI) {
 	});
 
 	registerCouncil(pi);
+	const board = registerBoard(pi);
 
 	const runStartupAudit = (ctx: ExtensionContext) => {
 		if (startupAuditDone) return;

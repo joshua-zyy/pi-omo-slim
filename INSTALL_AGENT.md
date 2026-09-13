@@ -27,9 +27,9 @@ This document is the operational contract for an Agent after this repository is 
 
 ## 1. Inspect and collect choices
 
-Read `README.md`, `scripts/install.mjs`, all seven `agents/*.md` templates (six specialists plus `councillor`), all five files under `extensions/orchestrator-mode/`, and the three files under `config/`.
+Read `README.md`, `scripts/install.mjs`, all seven `agents/*.md` templates (six specialists plus `councillor`), all six files under `extensions/orchestrator-mode/`, and the three files under `config/`.
 
-Inspect the following fourteen destinations and list unrelated custom Agents:
+Inspect the following seventeen destinations and list unrelated custom Agents:
 
 ```text
 agents/Explore.md
@@ -44,6 +44,7 @@ extensions/orchestrator-mode/orchestrator-policy.md
 extensions/orchestrator-mode/orchestrator-goal-policy.md
 extensions/orchestrator-mode/council.ts
 extensions/orchestrator-mode/council-policy.md
+extensions/orchestrator-mode/board.ts
 orchestrator-mode.json
 council.json
 subagents.json
@@ -126,7 +127,7 @@ node scripts/install.mjs apply --plan <absolute-plan.json> --sha256 <approved-64
 `apply` rejects a changed plan, changed repository template, changed approved replacement, prior attempt, or occupied output path before configuration mutation. It then:
 
 1. creates `apply-started.json` so an interrupted plan cannot be silently retried;
-2. backs up the latest execution-time target state and writes a sixteen-target `manifest.json`;
+2. backs up the latest execution-time target state and writes a seventeen-target `manifest.json`;
 3. installs only approved Agent/extension files and merges only approved JSON fields;
 4. leaves `settings.json` live bytes untouched while backing up its latest state;
 5. runs fixed verification;
