@@ -1519,6 +1519,16 @@ assert.match(
   "core policy must not run lanes against inputs still being written",
 );
 assert.match(
+  orchestratorPolicy,
+  /Never use the snapshot as a task ledger/,
+  "core policy must divide the lane snapshot from the task ledger",
+);
+assert.match(
+  orchestratorPolicy,
+  /full agent id from the snapshot, never an abbreviated form/,
+  "core policy must reference lanes by the full snapshot id",
+);
+assert.match(
   orchestratorGoalPolicy,
   /only while the current session has an active \/?goal/i,
   "Goal policy must state its active-Goal scope",
@@ -1538,9 +1548,9 @@ assert.ok(
 // Wave checkpoint contract after the pi-tasks migration: exactly one current
 // checkpoint as a non-executable task carrying the goal id, member ids,
 // acceptance decisions, and evidence references; execution tasks per work
-// unit (never per specialist role); live status read from the tools rather
-// than hand-copied; and the retired todo-description lane-accounting format
-// entirely gone.
+// unit (never per specialist role); live status read from the lane snapshot
+// and task tools rather than hand-copied; and the retired todo-description
+// lane-accounting format entirely gone.
 assert.match(
   orchestratorGoalPolicy,
   /exactly one current Wave or stage checkpoint as a non-executable task without `agentType`/,
@@ -1563,8 +1573,18 @@ assert.match(
 );
 assert.match(
   orchestratorGoalPolicy,
-  /do not copy it into the checkpoint/,
+  /do not copy live status into the checkpoint/,
   "goal policy must not hand-copy live status into the checkpoint",
+);
+assert.match(
+  orchestratorGoalPolicy,
+  /check every required lane in the current Wave from the lane snapshot/,
+  "goal policy must read post-wake lane state from the lane snapshot",
+);
+assert.match(
+  orchestratorGoalPolicy,
+  /available task records, and \(after compaction\) the lane snapshot/,
+  "goal policy must use the lane snapshot as a post-compaction recovery source",
 );
 assert.ok(
   !/does not echo `metadata`/.test(orchestratorGoalPolicy),
