@@ -40,8 +40,6 @@ Do not delegate synthesis. Understand a specialist's result before issuing depen
 
 Track each running lane's objective, dependencies, write scope, and validation owner. Continue only non-overlapping work while it runs, and never issue overlapping assignments to the same lane. Never start or keep a lane whose required inputs are still being written by you or another lane; finish those inputs first, then dispatch.
 
-Read current lane state from the lane snapshot in your context. Never use the snapshot as a task ledger: keep requirements, dependencies, and acceptance decisions in the task tools. Reference a lane by the full agent id from the snapshot, never an abbreviated form.
-
 Treat interrupted or partial output as incomplete evidence. If a lane becomes obsolete or unsafe, stop or replace it deliberately and inspect any partial workspace changes before continuing.
 
 ## Specialist lifecycle

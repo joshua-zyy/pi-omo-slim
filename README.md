@@ -78,7 +78,6 @@ Each one reports back, confirming the full roster with the Orchestrator ready to
 /orchestrator off      Disable it
 /orchestrator status   Show its current state
 /orchestrator doctor   Diagnose policies, agent files, and tool selectors
-/lanes                 Show tracked specialist lanes (subagent activity board)
 ```
 
 The optional global configuration file is `<config-root>/orchestrator-mode.json`:
@@ -94,24 +93,6 @@ The optional global configuration file is `<config-root>/orchestrator-mode.json`
 The effective state priority is: the latest explicit state in the current session branch, then `defaultEnabled`, then `false`. Consequently, `defaultEnabled: true` enables the mode when Pi opens a new session or switches to a session with no recorded mode state. A session branch that previously ran `/orchestrator on` or `/orchestrator off` retains that explicit state.
 
 The extension also audits every agent's `ext:` tool selectors against the tools the session actually provides. That audit runs once on the first agent turn rather than at session start: extensions such as pi-fff register their tools from their own `session_start` handlers, and auditing earlier false-flags tools that are registered moments later. A genuinely missing tool is reported once as a warning; `/orchestrator doctor` shows the full report on demand.
-
-### Lane board
-
-`/lanes` shows an on-demand snapshot of observed top-level subagent events: full agent ID, role, event status, elapsed time, objective, steer count, and token/result summary. It works whether Orchestrator Mode is on or off, and `/orchestrator doctor` includes an event-state summary. A same-ID resume starts a new observed run; the board replaces the previous run's timing, result, error and steer count.
-
-The board is a read-only observer built on pi-subagents' lifecycle events; it never spawns, steers, or consumes agents. The displayed states and counts come from events. At render time, registry disagreements are shown separately rather than silently rewriting event history. An unavailable registry, a failed lookup, an invalid record and a missing agent record are distinct unknown-state observations, not proof that execution stopped.
-
-A terminal registry record may carry a notification-consumption marker. Foreground inline delivery, `get_subagent_result` and RPC consumption can all set it. It is **not acceptance**, does not identify the delivery path, and does not prove a notification was never sent. Absence of the marker does not prove the result was ignored.
-
-Boundaries, stated honestly:
-
-- This is an on-demand inspection command, **not a stalled-agent detector**: an agent still registered as running may be making progress or may be stuck. There is no heartbeat, deadline, automatic wake, cancellation or redispatch.
-- While Orchestrator Mode is on, the board also appends a bounded, session-local snapshot to the model context before each LLM call. This is the part that helps the Orchestrator's bookkeeping after compaction. The snapshot is injected as a non-displayed custom message into that call's context copy only: it adds no extra turn, writes no session entry, registers no tool, and persists nothing — the next call rebuilds it from this activation's in-memory events and replaces the previous copy. With the mode off or the board empty, nothing is appended and any older snapshot of ours is removed. Even when compaction leaves only a summary in the visible history, the next call still carries the current snapshot.
-- The snapshot lists full agent IDs, bounded `type`/`description` labels, event states, and the separate registry observation per lane (kind, plus status and a known notification-consumption flag for a record). Lanes any signal shows queued/running come first; terminal lanes follow by completion time, newest first, with reverse insertion order as the same-millisecond tie-break. It deliberately excludes result and error bodies, prompts, steer messages, token billing, and workspace verdicts. Labels are JSON-escaped as untrusted data and the note says they are not instructions: fetch results with native tools and verify deliverables yourself. Registry `running` still only means registered, and a consumed notification is still not acceptance.
-- Two fixed caps bound the injection: at most 20 rows and 6000 UTF-16 characters for the note plus JSON. Oversized labels are truncated (64 characters for `type`, 160 for `description`) with a marker, but IDs are never truncated: a row whose ID does not fit is omitted whole, so a giant ID cannot crowd out later short IDs. `counts.shown`/`counts.omitted` and the `partial` flag stay accurate and the JSON stays parseable even when every row is omitted.
-- Each extension activation starts with an empty board. It keeps the latest observed run per ID in memory, does not rehydrate earlier history, and does not reconstruct a separate board for `/tree` branches. Event subscriptions start at `session_start` and are removed at `session_shutdown`.
-- Nested subagents and a workflow's children emit no lifecycle events and stay invisible; they report through their owner.
-- pi-subagents may evict finished agent records; the notification-consumption marker is only readable while the record lives. The command uses Pi's notification UI and produces no display in print/JSON modes.
 
 ## Council
 

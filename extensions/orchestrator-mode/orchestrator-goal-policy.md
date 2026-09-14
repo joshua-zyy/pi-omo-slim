@@ -13,15 +13,15 @@ For an active Goal:
 - When two or more substantial work items are genuinely independent, dispatch them as parallel background lanes in the same turn. Do not parallelize work with unresolved dependencies or conflicting write scopes.
 - Handle a genuinely bounded Goal directly, and never split one bounded action into artificial lanes.
 - Keep exactly one current Wave or stage checkpoint as a non-executable task without `agentType`. In its `description`, record the current `goal_id`, member task IDs (or Agent IDs for native dispatch), acceptance decisions, and evidence references. Keep it open until you have accepted every required result.
-- Create execution tasks per work unit when structured tracking is needed, not per specialist role. Read live lane state from the lane snapshot; query the task tools for task records; do not copy live status into the checkpoint.
+- Create execution tasks per work unit when structured tracking is needed, not per specialist role. Query task and Agent tools for live status; do not copy it into the checkpoint.
 
 ## Background lanes and waiting
 
 - Apply the core running-lane rules while required Goal work remains non-terminal.
 - Call `goal_wait` only when no independent work remains and a reliable wake source is available. Call it alone with `resume_after_ms: 1800000` as a lost-notification fallback, not as a polling interval.
-- Never block on a non-terminal lane with `get_subagent_result(wait: true)` or `TaskOutput(block: true)`. After a wake, check every required lane in the current Wave from the lane snapshot before advancing.
+- Never block on a non-terminal lane with `get_subagent_result(wait: true)` or `TaskOutput(block: true)`. After a wake, check every required lane in the current Wave before advancing.
 - Apply the core acceptance rules before completing the checkpoint; do not treat task `completed` as acceptance.
-- Recover the current Wave from its checkpoint, available task records, and (after compaction) the lane snapshot. Treat missing records and unresolved Agent IDs as unknown, not as success or proof that execution stopped. Reconcile available results, relevant artifacts or sources, and live execution before rebuilding the checkpoint or deciding to re-dispatch.
+- Recover the current Wave from its checkpoint and available task records after compaction or reload. Treat missing records and unresolved Agent IDs as unknown, not as success or proof that execution stopped. Reconcile available results, relevant artifacts or sources, and live execution before rebuilding the checkpoint or deciding to re-dispatch.
 
 ## Completion and verification
 

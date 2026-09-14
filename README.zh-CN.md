@@ -78,7 +78,6 @@ node scripts/install.mjs apply --plan <absolute-plan.json> --sha256 <approved-pl
 /orchestrator off      禁用
 /orchestrator status   显示当前状态
 /orchestrator doctor   诊断策略、agent 文件与工具选择器
-/lanes                 显示专家泳道实况（子代理活动看板）
 ```
 
 可选的全局配置文件为 `<config-root>/orchestrator-mode.json`：
@@ -94,24 +93,6 @@ node scripts/install.mjs apply --plan <absolute-plan.json> --sha256 <approved-pl
 生效状态的优先级为：当前会话分支中最近一次显式状态，其次 `defaultEnabled`，最后 `false`。因此，当 Pi 打开新会话或切换到未记录模式状态的会话时，`defaultEnabled: true` 会启用该模式；而曾执行过 `/orchestrator on` 或 `/orchestrator off` 的会话分支则保留其显式状态。
 
 扩展还会把各 agent 的 `ext:` 工具选择器与会话实际提供的工具做一次审计。该审计在首个 agent 回合运行，而不是会话启动时：pi-fff 等扩展在自身的 `session_start` 处理器里注册工具，过早审计会把稍后才注册的工具误报为缺失。确实缺失的工具只警告一次；`/orchestrator doctor` 可随时查看完整报告。
-
-### 泳道看板
-
-`/lanes` 按需显示已观察到的顶层子代理事件快照：完整 agent ID、角色、事件状态、耗时、目标、steer 次数，以及 token/结果摘要。无论 Orchestrator Mode 是否开启它都可用；`/orchestrator doctor` 也会包含事件状态概要。同一 ID 恢复执行时视为新一轮运行，替换上一轮的计时、结果、错误和 steer 计数。
-
-看板是构建在 pi-subagents 生命周期事件之上的只读观察者，从不派发、改道或消费代理。显示的状态和数量来自事件；渲染时，注册表与事件的差异会单独标注，而不是悄悄改写事件历史。注册表不可用、查询失败、记录无效和查无指定代理会分别标为未知状态，不能据此认定执行已经停止。
-
-终态注册表记录可能带有通知消费标志。前台直接返回结果、`get_subagent_result` 和 RPC 消费均可设置它。它**不代表验收通过**，不能识别具体交付路径，也不能证明通知从未发送。标志缺失也不证明结果被忽略。
-
-诚实声明的边界：
-
-- 这是按需查看命令，**不是卡死检测器**：仍登记为 running 的代理可能正常推进，也可能已经卡住。没有心跳、超时、自动唤醒、取消或重派机制。
-- Orchestrator Mode 开启时，看板还会在每次 LLM 调用前，把一份有界的会话内快照注入模型上下文——这正是缓解 Orchestrator 压缩后记账问题的部分。快照以不显示的 custom 消息只写入该次调用的上下文副本：不产生额外回合、不写入会话条目、不注册工具、也不持久保存任何内容；下一次调用都会基于本次激活的内存事件重建，并替换上一份副本。模式关闭或看板为空时不注入，且旧的快照仍会被移除。即使可见历史被压缩为只剩摘要，下一次调用仍会带上当前快照。
-- 快照列出完整 agent ID、有界的 `type`/`description` 标签、事件状态，以及每条泳道独立的注册表观察（kind，record 时附 status 和已知的通知消费标志）。事件或登记状态显示 queued/running 的泳道优先；终态泳道按完成时间从新到旧排列，同毫秒按原插入倒序。它刻意不含结果与错误正文、prompt、steer 消息、token 账单或工作区验收结论。标签按不可信数据做 JSON 转义，说明中明确指出它们不是指令：请用原生工具取结果并自行验收交付物。注册表 `running` 依然只代表已登记，通知被消费依然不代表验收。
-- 注入受两个固定上限约束：最多 20 行，说明加 JSON 合计最多 6000 个 UTF-16 字符。超长标签会带截断标记（`type` 64 字符、`description` 160 字符），但 ID 永不截断：放不下的整行省略，因此超长 ID 不会挤掉后面的短 ID。`counts.shown`/`counts.omitted` 与 `partial` 标志始终准确，即使所有行都被省略，JSON 仍可解析。
-- 每次扩展激活都从空看板开始，内存中只保留每个 ID 最近观察到的运行，不重建历史，也不按 `/tree` 分支重建独立看板。事件订阅在 `session_start` 建立，在 `session_shutdown` 移除。
-- 嵌套子代理与 workflow 的子代理不产生生命周期事件，保持不可见；它们经由各自的所有者汇报。
-- pi-subagents 可能驱逐已结束的代理记录；通知消费标志只在记录存活期间可读。命令使用 Pi 的通知 UI，在 print/JSON 模式下不显示。
 
 ## Council
 

@@ -104,7 +104,6 @@ const TARGET_IDS = [
   "extensions/orchestrator-mode/orchestrator-goal-policy.md",
   "extensions/orchestrator-mode/council.ts",
   "extensions/orchestrator-mode/council-policy.md",
-  "extensions/orchestrator-mode/board.ts",
   "orchestrator-mode.json",
   "council.json",
   "subagents.json",
@@ -287,7 +286,7 @@ assert.equal(
 );
 
 // (3) All eight dependencies installed: plan succeeds, plan.pi.dependencies is
-// exactly the fixed eight packages, targets are exactly the current seventeen,
+// exactly the fixed eight packages, targets are exactly the current sixteen,
 // the plan carries schema_version 3, the parsed Pi version (bare output form)
 // with the enforced minimum, and every dependency's installed version.
 const case3Root = join(fixtureRoot, "case3-all-eight");
@@ -334,12 +333,12 @@ assert.deepEqual(
 assert.equal(
   plan.targets.length,
   TARGET_IDS.length,
-  "targets must be exactly the current seventeen",
+  "targets must be exactly the current sixteen",
 );
 assert.deepEqual(
   plan.targets.map((target) => target.id),
   TARGET_IDS,
-  "target IDs must be exactly the current seventeen",
+  "target IDs must be exactly the current sixteen",
 );
 
 // Rebuilds the fake Pi environment from an approved plan so apply re-runs the
@@ -374,7 +373,7 @@ function runApply(planPath, sha256Hex, extraEnv = {}) {
 
 // (4) Apply the case-3 approved plan with the exact SHA from stdout: the
 // install/backup/verification success path must exit 0, write a succeeded
-// result, record a 17-target manifest, and leave exactly the sixteen managed
+// result, record a 16-target manifest, and leave exactly the fifteen managed
 // writes in place — while settings.json (observe-only) is never created.
 const approvedPlan = JSON.parse(readFileSync(planPath, "utf8"));
 const managedTargets = approvedPlan.targets.filter(
@@ -382,8 +381,8 @@ const managedTargets = approvedPlan.targets.filter(
 );
 assert.equal(
   managedTargets.length,
-  16,
-  "fresh-root plan must have exactly sixteen managed targets",
+  15,
+  "fresh-root plan must have exactly fifteen managed targets",
 );
 assert.deepEqual(
   approvedPlan.targets
@@ -423,7 +422,7 @@ assert.equal(
 assert.equal(
   applyResult.operations.length,
   managedTargets.length,
-  "result.json must record exactly the sixteen managed operations",
+  "result.json must record exactly the fifteen managed operations",
 );
 assert.ok(
   applyResult.operations.every((operation) => operation.type === "create"),
@@ -433,7 +432,7 @@ const successManifest = JSON.parse(readFileSync(applyResult.manifest, "utf8"));
 assert.equal(
   successManifest.targets.length,
   TARGET_IDS.length,
-  "manifest must have exactly the current seventeen targets",
+  "manifest must have exactly the current sixteen targets",
 );
 assert.deepEqual(
   successManifest.targets.map((item) => item.id),
@@ -464,7 +463,6 @@ for (const id of [
   "extensions/orchestrator-mode/orchestrator-goal-policy.md",
   "extensions/orchestrator-mode/council.ts",
   "extensions/orchestrator-mode/council-policy.md",
-  "extensions/orchestrator-mode/board.ts",
 ]) {
   const target = managedTargets.find((item) => item.id === id);
   assert.equal(
@@ -520,7 +518,7 @@ assert.equal(
 
 // (5) Injected verification failure: a fresh config root and a fresh
 // one-time plan, applied with PI_OMO_INSTALL_TEST_MODE=1 and
-// PI_OMO_INSTALL_TEST_FAILURE=during_verification. All sixteen managed writes
+// PI_OMO_INSTALL_TEST_FAILURE=during_verification. All fifteen managed writes
 // and the directories created for them must be rolled back exactly as the
 // plan's rollback contract describes, with no unresolved paths, while the
 // audit and backup records are retained and settings.json still never
@@ -545,8 +543,8 @@ const failureManaged = failurePlan.targets.filter(
 );
 assert.equal(
   failureManaged.length,
-  16,
-  "fresh-root plan must have exactly sixteen managed targets",
+  15,
+  "fresh-root plan must have exactly fifteen managed targets",
 );
 assert.equal(
   failurePlan.rollback.delete_files.length,
@@ -668,7 +666,7 @@ const failureManifest = JSON.parse(
 assert.equal(
   failureManifest.targets.length,
   TARGET_IDS.length,
-  "backup manifest must cover all seventeen targets",
+  "backup manifest must cover all sixteen targets",
 );
 assert.ok(
   failureManifest.targets.every((item) => item.existed === false),
@@ -1519,16 +1517,6 @@ assert.match(
   "core policy must not run lanes against inputs still being written",
 );
 assert.match(
-  orchestratorPolicy,
-  /Never use the snapshot as a task ledger/,
-  "core policy must divide the lane snapshot from the task ledger",
-);
-assert.match(
-  orchestratorPolicy,
-  /full agent id from the snapshot, never an abbreviated form/,
-  "core policy must reference lanes by the full snapshot id",
-);
-assert.match(
   orchestratorGoalPolicy,
   /only while the current session has an active \/?goal/i,
   "Goal policy must state its active-Goal scope",
@@ -1548,9 +1536,9 @@ assert.ok(
 // Wave checkpoint contract after the pi-tasks migration: exactly one current
 // checkpoint as a non-executable task carrying the goal id, member ids,
 // acceptance decisions, and evidence references; execution tasks per work
-// unit (never per specialist role); live status read from the lane snapshot
-// and task tools rather than hand-copied; and the retired todo-description
-// lane-accounting format entirely gone.
+// unit (never per specialist role); live status read from the tools rather
+// than hand-copied; and the retired todo-description lane-accounting format
+// entirely gone.
 assert.match(
   orchestratorGoalPolicy,
   /exactly one current Wave or stage checkpoint as a non-executable task without `agentType`/,
@@ -1573,18 +1561,8 @@ assert.match(
 );
 assert.match(
   orchestratorGoalPolicy,
-  /do not copy live status into the checkpoint/,
+  /do not copy it into the checkpoint/,
   "goal policy must not hand-copy live status into the checkpoint",
-);
-assert.match(
-  orchestratorGoalPolicy,
-  /check every required lane in the current Wave from the lane snapshot/,
-  "goal policy must read post-wake lane state from the lane snapshot",
-);
-assert.match(
-  orchestratorGoalPolicy,
-  /available task records, and \(after compaction\) the lane snapshot/,
-  "goal policy must use the lane snapshot as a post-compaction recovery source",
 );
 assert.ok(
   !/does not echo `metadata`/.test(orchestratorGoalPolicy),
@@ -1922,7 +1900,7 @@ for (const [name, text] of [
 
 // Council surface: both READMEs document /council, the council.json roster,
 // and the honest boundary disclosures; INSTALL_AGENT.md carries the v3
-// seventeen-destination/seventeen-target contract and the action-only councillor
+// fourteen-destination/sixteen-target contract and the action-only councillor
 // schema; no document mentions ultrawork (deferred, not shipped here).
 for (const [name, text, boundaryPhrases] of [
   [
@@ -1966,30 +1944,15 @@ for (const [name, text, boundaryPhrases] of [
       `${name} must disclose the ${label}`,
     );
 }
-for (const [name, text] of [
-  ["README.md", docs["README.md"]],
-  ["README.zh-CN.md", docs["README.zh-CN.md"]],
-]) {
-  assert.match(
-    text,
-    /\/lanes/,
-    `${name} must document the /lanes command`,
-  );
-  assert.match(
-    text,
-    name === "README.md" ? /read-only observer/ : /只读观察者/,
-    `${name} must disclose that the lane board is a read-only observer`,
-  );
-}
 assert.match(
   docs["INSTALL_AGENT.md"],
-  /seventeen destinations/,
-  "INSTALL_AGENT.md must list seventeen inspection destinations",
+  /fourteen destinations/,
+  "INSTALL_AGENT.md must list fourteen inspection destinations",
 );
 assert.match(
   docs["INSTALL_AGENT.md"],
-  /seventeen-target `manifest\.json`/,
-  "INSTALL_AGENT.md must describe the seventeen-target manifest",
+  /sixteen-target `manifest\.json`/,
+  "INSTALL_AGENT.md must describe the sixteen-target manifest",
 );
 assert.match(
   docs["INSTALL_AGENT.md"],
